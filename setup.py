@@ -28,7 +28,7 @@ setup(
     packages=find_packages(where="src"),
     python_requires=">=3.10",
     install_requires=[
-        "landscapy @ git+https://github.com/RSCJacksonLab/landscapy.git",
+        "landscapy @ git+https://github.com/RSCJacksonLab/landscapy.git@dev",
         "torch>=2.2",
         "gpytorch>=1.11",
         "pytorch-lightning>=2.3",
