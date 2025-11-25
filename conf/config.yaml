@@ -1,0 +1,29 @@
+defaults:
+  - ca_job
+  - _self_
+
+model: sequence_gp_classifier
+data: raw_sequences
+model_kwargs: {}
+data_kwargs: {}
+trainer_kwargs:
+  log_dir: logs
+  checkpoint_dir: checkpoints
+  experiment_name: ca_classifications
+  use_wandb: true
+  wandb_project: null
+  wandb_entity: null
+  wandb_run_name: null
+  wandb_tags: []
+  wandb_dir: null
+val_split: 0.1
+val_seed: 0
+log_file: null
+log_level: INFO
+seed: null
+fit: true
+test: false
+
+hydra:
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}

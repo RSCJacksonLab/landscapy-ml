@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union, Literal
 
 import torch
+import warnings
 from torch.utils.data import DataLoader, Dataset
 import pytorch_lightning as pl
 
@@ -38,30 +40,48 @@ def _pad_tokens(
     return padded_tokens, padded_masks
 
 
-def embed_sequences_to_records(
+def embed_sequences(
     sequences: Sequence[SequenceLike],
-    labels: Sequence[LabelLike],
     *,
-    label_key: str,
     embedding_mode: Literal["hard", "soft"] = "hard",
     model_name: str = "facebook/esm2_t6_8M_UR50D",
     device: Optional[str] = None,
     embedding_batch_size: int = 32,
     include_tokens: bool = True,
-) -> List[Dict[str, Any]]:
+) -> Tuple[torch.Tensor, Optional[List[torch.Tensor]], Optional[List[torch.Tensor]]]:
     """
-    Embed raw sequences using landscapy's ESM embedders and return records
-    matching FitnessLandscape.to_sequence_tensors output structure.
+    Embed raw sequences using landscapy's ESM embedders.
+
+    Returns
+    -------
+    embeddings : torch.Tensor
+        Shape [N, D] embedding matrix.
+    tokens : list[Tensor] or None
+        Padded token tensors per sequence (or None if include_tokens=False).
+    attention_masks : list[Tensor] or None
+        Corresponding attention masks (or None if include_tokens=False).
     """
+    if include_tokens and embedding_mode != "hard":
+        warnings.warn(
+            "include_tokens=True is only supported for hard tokenization; disabling tokens.",
+            RuntimeWarning,
+        )
+        include_tokens = False
     seq_list = list(sequences)
     if not seq_list:
         raise ValueError("sequences must not be empty.")
-    if len(seq_list) != len(labels):
-        raise ValueError("sequences and labels must have the same length.")
 
     mode = embedding_mode.lower()
     if mode not in {"hard", "soft"}:
         raise ValueError("embedding_mode must be 'hard' or 'soft'.")
+    logger = logging.getLogger("ca_classifications")
+    logger.info(
+        "Embedding %d sequences (mode=%s, model=%s, batch_size=%d)",
+        len(seq_list),
+        mode,
+        model_name,
+        embedding_batch_size,
+    )
 
     try:
         if mode == "hard":
@@ -110,25 +130,53 @@ def embed_sequences_to_records(
 
     embedding_stack = torch.stack([emb for emb in embeddings], dim=0).float()
 
-    padded_tokens: List[torch.Tensor]
-    padded_masks: List[torch.Tensor]
     if include_tokens:
         if any(tok is None for tok in seq_tokens) or any(mask is None for mask in attn_masks):
             raise RuntimeError("Tokenization failed for one or more sequences.")
         padded_tokens, padded_masks = _pad_tokens(seq_tokens, attn_masks, pad_value=pad_value)
-    else:
-        padded_tokens = [embedding_stack[i] for i in range(n)]
-        padded_masks = [torch.empty(0, dtype=torch.long) for _ in range(n)]
+        logger.info("Finished embedding %d sequences", len(seq_list))
+        return embedding_stack, padded_tokens, padded_masks
+
+    logger.info("Finished embedding %d sequences", len(seq_list))
+    return embedding_stack, None, None
+
+
+def embed_sequences_to_records(
+    sequences: Sequence[SequenceLike],
+    labels: Sequence[LabelLike],
+    *,
+    label_key: str,
+    embedding_mode: Literal["hard", "soft"] = "hard",
+    model_name: str = "facebook/esm2_t6_8M_UR50D",
+    device: Optional[str] = None,
+    embedding_batch_size: int = 32,
+    include_tokens: bool = True,
+) -> List[Dict[str, Any]]:
+    """
+    Embed raw sequences using landscapy's ESM embedders and return records
+    matching FitnessLandscape.to_sequence_tensors output structure.
+    """
+    embeddings, tokens, masks = embed_sequences(
+        sequences,
+        embedding_mode=embedding_mode,
+        model_name=model_name,
+        device=device,
+        embedding_batch_size=embedding_batch_size,
+        include_tokens=include_tokens,
+    )
+
+    if len(sequences) != len(labels):
+        raise ValueError("sequences and labels must have the same length.")
 
     records: List[Dict[str, Any]] = []
-    for i in range(n):
+    for i, label in enumerate(labels):
         record = {
-            "sequence_tensor": padded_tokens[i],
-            "fitness_tensors": {label_key: torch.as_tensor(labels[i])},
-            "embedding": embedding_stack[i],
+            "sequence_tensor": tokens[i] if tokens is not None else embeddings[i],
+            "fitness_tensors": {label_key: torch.as_tensor(label)},
+            "embedding": embeddings[i],
         }
-        if include_tokens:
-            record["attention_mask"] = padded_masks[i]
+        if masks is not None:
+            record["attention_mask"] = masks[i]
         records.append(record)
 
     return records
@@ -222,6 +270,7 @@ class SequenceClassificationDataModule(pl.LightningDataModule):
         *,
         train_data: Any,
         label_key: str,
+        label_mapping: Optional[Sequence[str]] = None,
         val_data: Any = None,
         test_data: Any = None,
         predict_data: Any = None,
@@ -229,6 +278,8 @@ class SequenceClassificationDataModule(pl.LightningDataModule):
         num_workers: int = 0,
         pin_memory: bool = False,
         shuffle: bool = True,
+        val_split: float = 0.0,
+        val_seed: Optional[int] = None,
     ) -> None:
         super().__init__()
         self.train_records = _normalize_records(train_data)
@@ -238,10 +289,13 @@ class SequenceClassificationDataModule(pl.LightningDataModule):
             _normalize_records(predict_data) if predict_data is not None else []
         )
         self.label_key = label_key
+        self.label_mapping = list(label_mapping) if label_mapping is not None else None
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         self.shuffle = shuffle
+        self.val_split = val_split
+        self.val_seed = val_seed
 
         if not self.train_records:
             raise ValueError("train_data must not be empty.")
@@ -253,6 +307,15 @@ class SequenceClassificationDataModule(pl.LightningDataModule):
 
     def setup(self, stage: Optional[str] = None) -> None:
         if stage in (None, "fit"):
+            if not self.val_records and self.val_split > 0:
+                # Split train_records into train/val
+                rng = torch.Generator().manual_seed(self.val_seed or 0)
+                idx = torch.randperm(len(self.train_records), generator=rng).tolist()
+                split = int(len(idx) * (1 - self.val_split))
+                train_idx, val_idx = idx[:split], idx[split:]
+                self.val_records = [self.train_records[i] for i in val_idx]
+                self.train_records = [self.train_records[i] for i in train_idx]
+
             self._train_ds = SequenceClassificationDataset(self.train_records, self.label_key)
             if self.val_records:
                 self._val_ds = SequenceClassificationDataset(self.val_records, self.label_key)

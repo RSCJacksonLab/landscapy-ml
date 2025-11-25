@@ -29,6 +29,8 @@ setup(
     python_requires=">=3.10",
     install_requires=[
         "landscapy @ git+https://github.com/RSCJacksonLab/landscapy.git@dev",
+        "click>=8.1",
+        "hydra-core>=1.3",
         "torch>=2.2",
         "gpytorch>=1.11",
         "pytorch-lightning>=2.3",
@@ -44,5 +46,6 @@ setup(
             "black>=24.4",
             "isort>=5.13",
         ],
+        "tracking": ["wandb>=0.16"],
     },
 )
