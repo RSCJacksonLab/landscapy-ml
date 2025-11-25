@@ -29,6 +29,7 @@ class CSVConfigRequest:
     seed: Optional[int] = None
     val_split: float = 0.0
     val_seed: Optional[int] = None
+    model_key: str = "sequence_gp_classifier"
     # TODO: Support landscapy FitnessLandscape inputs directly.
 
 
@@ -48,6 +49,7 @@ def build_config_from_dataframe(
     seed: Optional[int] = None,
     val_split: float = 0.0,
     val_seed: Optional[int] = None,
+    model_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Construct a config dictionary from an in-memory dataframe."""
     if sequence_column not in df or label_column not in df:
@@ -59,7 +61,7 @@ def build_config_from_dataframe(
     label_mapping = cats.cat.categories.tolist()
 
     config: Dict[str, Any] = {
-        "model": model,
+        "model": model_key or model,
         "data": data,
         "model_kwargs": {"num_classes": int(len(label_mapping))},
         "data_kwargs": {
@@ -106,6 +108,7 @@ def build_config_from_csv(req: CSVConfigRequest) -> Dict[str, Any]:
         seed=req.seed,
         val_split=req.val_split,
         val_seed=req.val_seed,
+        model_key=req.model_key,
     )
 
 

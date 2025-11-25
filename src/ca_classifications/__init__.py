@@ -7,6 +7,7 @@ from .data import (
     embed_sequences,
 )
 from .gp_classification import SequenceGPClassifier, SequenceGPModel, create_trainer
+from .mlp_classification import SequenceMLPClassifier, SequenceMLPEnsembleClassifier
 from .trainer import TrainingJob, register_model, register_data
 from .inference import predict_landscape_records, predict_sequences
 from .data_utils import (
@@ -24,6 +25,8 @@ __all__ = [
     "SequenceClassificationDataModule",
     "embed_sequences_to_records",
     "embed_sequences",
+    "SequenceMLPClassifier",
+    "SequenceMLPEnsembleClassifier",
     "TrainingJob",
     "register_model",
     "register_data",

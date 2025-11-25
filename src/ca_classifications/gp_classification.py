@@ -141,6 +141,10 @@ class SequenceGPClassifier(pl.LightningModule):
         self.log("test/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("test/acc", accuracy, prog_bar=True, on_step=False, on_epoch=True)
 
+    def predict(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Alias for predict_with_uncertainty for consistency across models."""
+        return self.predict_with_uncertainty(inputs)
+
     def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
         inputs, _ = batch
         with torch.no_grad():

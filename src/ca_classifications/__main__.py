@@ -72,6 +72,7 @@ def train(ctx: click.Context, config_path: Path | None) -> None:
 @click.option("--seed", default=None, type=int, help="Optional seed.")
 @click.option("--val-split", default=0.1, show_default=True, type=float, help="Fraction of training used for validation when no val data provided.")
 @click.option("--val-seed", default=None, type=int, help="Optional seed for val split.")
+@click.option("--model-key", default="sequence_gp_classifier", show_default=True, help="Registered model key to use (e.g., sequence_gp_classifier, sequence_mlp_classifier).")
 def config_from_csv(
     csv_path: Path,
     sequence_column: str,
@@ -86,6 +87,7 @@ def config_from_csv(
     seed: int | None,
     val_split: float,
     val_seed: int | None,
+    model_key: str,
 ) -> None:
     req = CSVConfigRequest(
         csv_path=csv_path,
@@ -100,6 +102,7 @@ def config_from_csv(
         seed=seed,
         val_split=val_split,
         val_seed=val_seed,
+        model_key=model_key,
     )
     config = build_config_from_csv(req)
     out_dir.mkdir(parents=True, exist_ok=True)

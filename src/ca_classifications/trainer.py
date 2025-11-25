@@ -10,6 +10,7 @@ import torch
 
 from .data import SequenceClassificationDataModule, embed_sequences_to_records
 from .gp_classification import SequenceGPClassifier, create_trainer
+from .mlp_classification import SequenceMLPClassifier, SequenceMLPEnsembleClassifier
 
 ModelFactory = Callable[..., pl.LightningModule]
 DataFactory = Callable[..., pl.LightningDataModule]
@@ -33,6 +34,8 @@ def register_data(name: str, factory: DataFactory, *, overwrite: bool = False) -
 
 # Default registry entries
 register_model("sequence_gp_classifier", SequenceGPClassifier, overwrite=True)
+register_model("sequence_mlp_classifier", SequenceMLPClassifier, overwrite=True)
+register_model("sequence_mlp_ensemble", SequenceMLPEnsembleClassifier, overwrite=True)
 # TODO: add additional models to the registry and expose selection in CLI/config.
 register_data("fitness_landscape_records", SequenceClassificationDataModule, overwrite=True)
 register_data(
