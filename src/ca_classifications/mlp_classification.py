@@ -19,6 +19,8 @@ class SequenceMLPClassifier(pl.LightningModule):
         dropout: float = 0.1,
         learning_rate: float = 1e-3,
         weight_decay: float = 0.0,
+        embedding_domain: Optional[str] = None,
+        embedding_model: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
@@ -26,6 +28,8 @@ class SequenceMLPClassifier(pl.LightningModule):
             raise ValueError("num_features must be positive")
         if num_classes <= 1:
             raise ValueError("num_classes must be greater than 1 for classification")
+        self.embedding_domain = embedding_domain
+        self.embedding_model = embedding_model
 
         layers: List[nn.Module] = []
         input_dim = num_features
@@ -85,6 +89,8 @@ class SequenceMLPEnsembleClassifier(pl.LightningModule):
         dropout: float = 0.1,
         learning_rate: float = 1e-3,
         weight_decay: float = 0.0,
+        embedding_domain: Optional[str] = None,
+        embedding_model: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
@@ -95,6 +101,9 @@ class SequenceMLPEnsembleClassifier(pl.LightningModule):
         if num_models < 1:
             raise ValueError("num_models must be at least 1")
 
+        self.embedding_domain = embedding_domain
+        self.embedding_model = embedding_model
+
         self.models = nn.ModuleList(
             [
                 SequenceMLPClassifier(
@@ -104,6 +113,8 @@ class SequenceMLPEnsembleClassifier(pl.LightningModule):
                     dropout=dropout,
                     learning_rate=learning_rate,
                     weight_decay=weight_decay,
+                    embedding_domain=embedding_domain,
+                    embedding_model=embedding_model,
                 ).net
                 for _ in range(num_models)
             ]

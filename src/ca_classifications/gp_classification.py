@@ -55,6 +55,8 @@ class SequenceGPClassifier(pl.LightningModule):
         learning_rate: float = 0.01,
         weight_decay: float = 0.0,
         num_data: Optional[int] = None,
+        embedding_domain: Optional[str] = None,
+        embedding_model: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["inducing_points"])
@@ -75,6 +77,8 @@ class SequenceGPClassifier(pl.LightningModule):
         )
         self._num_data = num_data
         self.num_classes = num_classes
+        self.embedding_domain = embedding_domain
+        self.embedding_model = embedding_model
         # Epoch accumulators
         self._train_correct = 0
         self._train_total = 0

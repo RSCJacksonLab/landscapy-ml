@@ -28,15 +28,31 @@ def _config_path() -> str:
     return str(DEFAULT_CONFIG_PATH)
 
 
-def _run_job(cfg: JobConfig) -> None:
+def _make_absolute(path_str: Optional[str], base: Path) -> Optional[str]:
+    if path_str is None:
+        return None
+    p = Path(path_str)
+    if p.is_absolute():
+        return str(p)
+    return str(base / p)
+
+
+def _run_job(cfg: JobConfig, base_dir: Optional[Path] = None) -> None:
     configure_logger(cfg.log_file, cfg.log_level)
     # TODO: honor model choices beyond the GP classifier when registry is expanded.
+    if base_dir is None:
+        base_dir = Path.cwd()
+    # Normalize trainer paths relative to config dir
+    tk = dict(cfg.trainer_kwargs)
+    tk["log_dir"] = _make_absolute(tk.get("log_dir"), base_dir)
+    tk["checkpoint_dir"] = _make_absolute(tk.get("checkpoint_dir"), base_dir)
+
     job = TrainingJob(
         model_name=cfg.model,
         data_name=cfg.data,
         model_kwargs=cfg.model_kwargs,
         data_kwargs=cfg.data_kwargs,
-        trainer_kwargs=cfg.trainer_kwargs,
+        trainer_kwargs=tk,
         seed=cfg.seed,
     )
     trainer, model, dm = job.build()
@@ -64,7 +80,7 @@ def run_with_hydra(overrides: Optional[Iterable[str]] = None) -> int:
         job_cfg = OmegaConf.to_object(cfg)
         if not isinstance(job_cfg, JobConfig):
             job_cfg = JobConfig(**job_cfg)  # type: ignore[arg-type]
-        _run_job(job_cfg)
+        _run_job(job_cfg, base_dir=config_dir)
     except SystemExit as exc:
         return exc.code
     return 0
