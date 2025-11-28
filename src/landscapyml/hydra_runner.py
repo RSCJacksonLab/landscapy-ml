@@ -14,11 +14,11 @@ from .trainer import TrainingJob
 
 # Register structured config so Hydra can validate keys.
 cs = ConfigStore.instance()
-cs.store(name="ca_job", node=JobConfig)
+cs.store(name="landscapyml_job", node=JobConfig)
 
 # Resolve default config directory (project_root/conf).
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "conf"
-ENV_CONFIG_PATH = "CA_CLASSIFICATIONS_CONFIG_PATH"
+ENV_CONFIG_PATH = "LANDSCAPYML_CONFIG_PATH"
 
 
 def _config_path() -> str:
@@ -75,7 +75,7 @@ def run_with_hydra(overrides: Optional[Iterable[str]] = None) -> int:
     over = list(overrides) if overrides else []
 
     try:
-        with initialize_config_dir(version_base=None, config_dir=str(config_dir), job_name="ca_classifications"):
+        with initialize_config_dir(version_base=None, config_dir=str(config_dir), job_name="landscapyml"):
             cfg = compose(config_name="config", overrides=over)
         job_cfg = OmegaConf.to_object(cfg)
         if not isinstance(job_cfg, JobConfig):

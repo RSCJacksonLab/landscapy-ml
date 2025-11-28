@@ -1,5 +1,5 @@
 defaults:
-  - ca_job
+  - landscapyml_job
   - _self_
 
 model: sequence_gp_classifier
@@ -9,7 +9,7 @@ data_kwargs: {}
 trainer_kwargs:
   log_dir: logs
   checkpoint_dir: checkpoints
-  experiment_name: ca_classifications
+  experiment_name: landscapyml
   use_wandb: true
   wandb_project: null
   wandb_entity: null

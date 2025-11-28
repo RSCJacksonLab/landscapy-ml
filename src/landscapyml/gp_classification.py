@@ -237,7 +237,7 @@ def create_trainer(
     devices: Optional[int] = 1,
     log_every_n_steps: int = 10,
     log_dir: str = "logs",
-    experiment_name: str = "ca_classifications",
+    experiment_name: str = "landscapyml",
     checkpoint_dir: str = "checkpoints",
     checkpoint_monitor: Optional[str] = "val/loss",
     checkpoint_mode: str = "min",

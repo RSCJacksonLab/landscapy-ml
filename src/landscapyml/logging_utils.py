@@ -11,7 +11,7 @@ def configure_logger(log_file: Optional[str] = None, log_level: str = "INFO") ->
 
     If log_file is provided, logs are written there; otherwise, logs go to stdout.
     """
-    logger = logging.getLogger("ca_classifications")
+    logger = logging.getLogger("landscapyml")
     level = getattr(logging, str(log_level).upper(), logging.INFO)
     logger.setLevel(level)
 

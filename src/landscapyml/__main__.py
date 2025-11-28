@@ -11,7 +11,7 @@ from .trainer import _DATA_REGISTRY, _MODEL_REGISTRY  # type: ignore
 from .data_utils import build_config_from_csv, write_config, CSVConfigRequest
 
 
-@click.group(help="CA-classifications CLI (training utilities).")
+@click.group(help="landscapy-ml CLI (training utilities).")
 def cli() -> None:
     pass
 
@@ -62,7 +62,7 @@ def train(ctx: click.Context, config_path: Path | None) -> None:
 @click.option("--csv-path", required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("--sequence-column", required=True, help="Column name containing raw sequences.")
 @click.option("--label-column", required=True, help="Column name containing class labels.")
-@click.option("--out-dir", type=click.Path(dir_okay=True, file_okay=False, path_type=Path), default=Path("ca_run_conf"), show_default=True)
+@click.option("--out-dir", type=click.Path(dir_okay=True, file_okay=False, path_type=Path), default=Path("landscapyml_run_conf"), show_default=True)
 @click.option("--embedding-mode", default="hard", show_default=True, help="Embedding mode: hard or soft.")
 @click.option("--model-name", default="facebook/esm2_t6_8M_UR50D", show_default=True, help="PLM model for embeddings.")
 @click.option("--max-epochs", default=5, show_default=True, help="Max training epochs.")
@@ -112,7 +112,7 @@ def config_from_csv(
 
 def main(argv: List[str] | None = None) -> int:
     try:
-        cli.main(args=argv, prog_name="ca_classifications", standalone_mode=False)
+        cli.main(args=argv, prog_name="landscapyml", standalone_mode=False)
     except SystemExit as exc:  # click exits via SystemExit
         return exc.code
     except Exception:

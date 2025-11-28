@@ -1,4 +1,4 @@
-# CA-classifications
+# landscapy-ml
 
 Sequence classification utilities for carbonic anhydrase families built on top of
 `landscapy`, GPyTorch, and PyTorch Lightning.
@@ -6,8 +6,10 @@ Sequence classification utilities for carbonic anhydrase families built on top o
 ## Installation
 
 ```bash
+pip install landscapy-ml
+# or from source
 pip install .
-# or for development
+# development mode
 pip install -e ".[dev]"
 ```
 
@@ -16,7 +18,7 @@ pip install -e ".[dev]"
 ```python
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from ca_classifications import (
+from landscapyml import (
     SequenceGPClassifier,
     SequenceClassificationDataModule,
     create_trainer,
@@ -48,7 +50,7 @@ probs, uncertainty = model.predict_with_uncertainty(embeddings)
 # trainer.fit(model, datamodule=dm)
 
 # Embedding raw sequences with landscapy (hard/soft ESM) before training
-# from ca_classifications import embed_sequences_to_records
+# from landscapyml import embed_sequences_to_records
 # sequences = ["ACDE", "WXYZ"]
 # labels = [0, 1]
 # records = embed_sequences_to_records(
@@ -77,12 +79,12 @@ probs, uncertainty = model.predict_with_uncertainty(embeddings)
 # )
 # trainer, model, dm = job.run()
 
-# CLI (python -m ca_classifications)
+# CLI (python -m landscapyml)
 # List available registry entries
-# python -m ca_classifications list
+# python -m landscapyml list
 #
 # Hydra-driven training (uses conf/config.yaml by default)
-# python -m ca_classifications train model_kwargs.num_classes=2 \
+# python -m landscapyml train model_kwargs.num_classes=2 \
 #   data_kwargs.train_sequences='[\"ACDE\",\"WXYZ\"]' \
 #   data_kwargs.train_labels='[0,1]' \
 #   data_kwargs.label_key=label \
@@ -92,14 +94,14 @@ probs, uncertainty = model.predict_with_uncertainty(embeddings)
 # (outputs/YYYY-MM-DD/HH-MM-SS by default), under logs/ and checkpoints/.
 #
 # Optional Weights & Biases tracking (install with `pip install .[tracking]`):
-# python -m ca_classifications train trainer_kwargs.use_wandb=true \
+# python -m landscapyml train trainer_kwargs.use_wandb=true \
 #   trainer_kwargs.wandb_project=my_project trainer_kwargs.wandb_run_name=test_run
 #
 # Override config directory (if you keep custom configs elsewhere)
-# python -m ca_classifications train --config-path /path/to/conf model=sequence_gp_classifier
+# python -m landscapyml train --config-path /path/to/conf model=sequence_gp_classifier
 #
 # Hydra multirun (sweep over num_classes)
-# python -m ca_classifications train -m model_kwargs.num_classes=2,4 trainer_kwargs.max_epochs=5
+# python -m landscapyml train -m model_kwargs.num_classes=2,4 trainer_kwargs.max_epochs=5
 ```
 
 `SequenceGPClassifier` wraps a variational GPyTorch model with a softmax

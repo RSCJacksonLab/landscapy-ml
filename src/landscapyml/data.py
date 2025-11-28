@@ -74,7 +74,7 @@ def embed_sequences(
     mode = embedding_mode.lower()
     if mode not in {"hard", "soft"}:
         raise ValueError("embedding_mode must be 'hard' or 'soft'.")
-    logger = logging.getLogger("ca_classifications")
+    logger = logging.getLogger("landscapyml")
     logger.info(
         "Embedding %d sequences (mode=%s, model=%s, batch_size=%d)",
         len(seq_list),
@@ -263,7 +263,7 @@ class SequenceClassificationDataset(Dataset):
 
 
 class SequenceClassificationDataModule(pl.LightningDataModule):
-    """Lightning DataModule for CA sequence classification."""
+    """Lightning DataModule for sequence classification."""
 
     def __init__(
         self,

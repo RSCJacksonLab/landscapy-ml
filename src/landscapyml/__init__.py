@@ -1,4 +1,4 @@
-"""CA-classifications package."""
+"""landscapy-ml package."""
 
 from .data import (
     SequenceClassificationDataModule,

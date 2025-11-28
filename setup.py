@@ -6,16 +6,16 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 
 setup(
-    name="ca-classifications",
+    name="landscapy-ml",
     version="0.1.0",
     author="Matthew A. Spence",
     author_email="matthew.spence@anu.edu.au",
     description="Sequence classification utilities for carbonic anhydrase families",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/matthew-spence/CA-classifications",
+    url="https://github.com/matthew-spence/landscapy-ml",
     project_urls={
-        "Bug Tracker": "https://github.com/matthew-spence/CA-classifications/issues",
+        "Bug Tracker": "https://github.com/matthew-spence/landscapy-ml/issues",
     },
     classifiers=[
         "Programming Language :: Python :: 3",
