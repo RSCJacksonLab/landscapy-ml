@@ -9,7 +9,28 @@ import torch.nn.functional as F
 
 
 class SequenceMLPClassifier(pl.LightningModule):
-    """Simple MLP classifier for sequence embeddings."""
+    """
+    Simple MLP classifier for sequence embeddings.
+
+    Parameters
+    ----------
+    num_features : int
+        Feature dimension of the input embeddings.
+    num_classes : int
+        Number of output classes.
+    hidden_sizes : Iterable[int] or None, default=(256, 128)
+        Hidden layer sizes for the feedforward network.
+    dropout : float, default=0.1
+        Dropout probability applied after hidden layers.
+    learning_rate : float, default=1e-3
+        Learning rate for the optimizer.
+    weight_decay : float, default=0.0
+        Weight decay for the optimizer.
+    embedding_domain : str, optional
+        Optional embedding domain metadata for downstream compatibility checks.
+    embedding_model : str, optional
+        Optional embedding model identifier for downstream compatibility checks.
+    """
 
     def __init__(
         self,
@@ -78,7 +99,30 @@ class SequenceMLPClassifier(pl.LightningModule):
 
 
 class SequenceMLPEnsembleClassifier(pl.LightningModule):
-    """Deep ensemble of simple MLP classifiers for uncertainty estimation."""
+    """
+    Deep ensemble of simple MLP classifiers for uncertainty estimation.
+
+    Parameters
+    ----------
+    num_features : int
+        Feature dimension of the input embeddings.
+    num_classes : int
+        Number of output classes.
+    num_models : int, default=5
+        Number of ensemble members.
+    hidden_sizes : Iterable[int] or None, default=(256, 128)
+        Hidden layer sizes shared across ensemble members.
+    dropout : float, default=0.1
+        Dropout probability applied after hidden layers.
+    learning_rate : float, default=1e-3
+        Learning rate for the optimizer.
+    weight_decay : float, default=0.0
+        Weight decay for the optimizer.
+    embedding_domain : str, optional
+        Optional embedding domain metadata.
+    embedding_model : str, optional
+        Optional embedding model identifier.
+    """
 
     def __init__(
         self,
@@ -129,7 +173,9 @@ class SequenceMLPEnsembleClassifier(pl.LightningModule):
         logits_list = self.forward(x)
         losses = [F.cross_entropy(logits, y) for logits in logits_list]
         loss = torch.stack(losses).mean()
-        probs = torch.stack([F.softmax(logits, dim=-1) for logits in logits_list], dim=0)
+        probs = torch.stack(
+            [F.softmax(logits, dim=-1) for logits in logits_list], dim=0
+        )
         mean_probs = probs.mean(dim=0)
         preds = mean_probs.argmax(dim=-1)
         acc = (preds == y).float().mean()
@@ -151,8 +197,22 @@ class SequenceMLPEnsembleClassifier(pl.LightningModule):
         self.log("test/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("test/acc", acc, prog_bar=True, on_step=False, on_epoch=True)
 
-    def predict_with_uncertainty(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return ensemble mean probs and variance across models."""
+    def predict_with_uncertainty(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Return ensemble mean probabilities and variance across models.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input embedding matrix of shape ``(N, D)``.
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor]
+            Mean probabilities and variances of shape ``(N, num_classes)``.
+        """
         self.eval()
         with torch.no_grad():
             probs = torch.stack([F.softmax(m(x), dim=-1) for m in self.models], dim=0)

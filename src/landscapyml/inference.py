@@ -26,7 +26,27 @@ def predict_sequences(
     embedding_batch_size: int = 32,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Embed raw sequences and return (mean_probs, variance) from the classifier.
+    Embed raw sequences and predict class probabilities with uncertainty.
+
+    Parameters
+    ----------
+    model : SequenceGPClassifier
+        Trained classifier implementing ``predict_with_uncertainty``.
+    sequences : Sequence[Any]
+        Raw sequences to embed and classify.
+    embedding_mode : str, default="hard"
+        Embedding strategy for raw sequences.
+    model_name : str, default="facebook/esm2_t6_8M_UR50D"
+        Model identifier used by landscapy embedders.
+    device : str, optional
+        Device string forwarded to the embedder.
+    embedding_batch_size : int, default=32
+        Batch size used during embedding.
+
+    Returns
+    -------
+    tuple[torch.Tensor, torch.Tensor]
+        Mean class probabilities and variance tensors on CPU.
     """
     model.eval()
     embeddings, _, _ = embed_sequences(
@@ -47,7 +67,24 @@ def predict_landscape_records(
     records: Iterable[Mapping[str, Any]],
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Run inference on records exported from FitnessLandscape.to_sequence_tensors.
+    Run inference on FitnessLandscape record dictionaries.
+
+    Parameters
+    ----------
+    model : SequenceGPClassifier
+        Trained classifier implementing ``predict_with_uncertainty``.
+    records : Iterable[Mapping[str, Any]]
+        Iterable of record dictionaries containing ``embedding`` or ``sequence_tensor``.
+
+    Returns
+    -------
+    tuple[torch.Tensor, torch.Tensor]
+        Mean class probabilities and variance tensors on CPU.
+
+    Raises
+    ------
+    ValueError
+        If a record lacks the required feature fields.
     """
     model.eval()
     feats = []
@@ -80,11 +117,17 @@ def _prob_categorical_adapter(
     layer_name: str,
 ) -> Any:
     if "mean" not in outputs:
-        raise ValueError("Probabilistic categorical adapter requires 'mean' prediction.")
+        raise ValueError(
+            "Probabilistic categorical adapter requires 'mean' prediction."
+        )
     mean = outputs["mean"]
     var = outputs.get("var")
     num_classes = mean.shape[-1]
-    cats = list(categories) if categories is not None else [f"class_{i}" for i in range(num_classes)]
+    cats = (
+        list(categories)
+        if categories is not None
+        else [f"class_{i}" for i in range(num_classes)]
+    )
     if len(cats) != num_classes:
         raise ValueError("Number of categories does not match model output dimension.")
     meta = dict(metadata)
@@ -103,13 +146,19 @@ _LAYER_ADAPTERS: dict[str, LayerAdapter] = {
 }
 
 
-def register_model_layer_mapping(model_cls: Type[Any], layer_kind: str, *, overwrite: bool = False) -> None:
+def register_model_layer_mapping(
+    model_cls: Type[Any], layer_kind: str, *, overwrite: bool = False
+) -> None:
     if model_cls in _MODEL_TO_LAYER and not overwrite:
-        raise ValueError(f"Model {model_cls.__name__} already mapped to {_MODEL_TO_LAYER[model_cls]!r}.")
+        raise ValueError(
+            f"Model {model_cls.__name__} already mapped to {_MODEL_TO_LAYER[model_cls]!r}."
+        )
     _MODEL_TO_LAYER[model_cls] = layer_kind
 
 
-def register_layer_adapter(kind: str, adapter: LayerAdapter, *, overwrite: bool = False) -> None:
+def register_layer_adapter(
+    kind: str, adapter: LayerAdapter, *, overwrite: bool = False
+) -> None:
     if kind in _LAYER_ADAPTERS and not overwrite:
         raise ValueError(f"Adapter for layer kind {kind!r} already exists.")
     _LAYER_ADAPTERS[kind] = adapter
@@ -128,15 +177,47 @@ def infer_fitness_layer_from_landscape(
     categories: Optional[Sequence[str]] = None,
 ) -> ProbabilisticCategoricalFitness:
     """
-    Run inference on a FitnessLandscape using a registered model and return a fitness layer.
+    Run inference on a ``FitnessLandscape`` and construct a predicted fitness layer.
 
-    The model type must be registered in _MODEL_TO_LAYER, and a layer adapter must exist
-    in _LAYER_ADAPTERS for that layer kind.
+    Parameters
+    ----------
+    landscape : FitnessLandscape
+        Landscape object providing embeddings.
+    model : Any
+        Trained model registered in ``_MODEL_TO_LAYER``.
+    batch_size : int, default=256
+        Batch size for inference DataLoader.
+    num_workers : int, default=0
+        Number of DataLoader workers.
+    device : str, optional
+        Device to place model inputs on; defaults to the model device.
+    attach : bool, default=True
+        Whether to attach the resulting layer to the landscape.
+    inplace : bool, default=True
+        If ``attach`` is true, whether to attach in-place or on a copy.
+    layer_name : str, default="predicted_fitness"
+        Name assigned to the created layer.
+    categories : Sequence[str], optional
+        Optional category names; defaults to inferred class indices.
+
+    Returns
+    -------
+    ProbabilisticCategoricalFitness
+        Fitness layer produced by the registered adapter.
+
+    Raises
+    ------
+    ValueError
+        If the model type is unsupported or embedding compatibility checks fail.
+    RuntimeError
+        If embeddings are unavailable and cannot be computed.
     """
     model_type = type(model)
     layer_kind = _MODEL_TO_LAYER.get(model_type)
     if layer_kind is None:
-        raise ValueError(f"Model type {model_type.__name__} is not supported for inference.")
+        raise ValueError(
+            f"Model type {model_type.__name__} is not supported for inference."
+        )
     adapter = _LAYER_ADAPTERS.get(layer_kind)
     if adapter is None:
         raise ValueError(f"No adapter registered for layer kind '{layer_kind}'.")
@@ -160,7 +241,9 @@ def infer_fitness_layer_from_landscape(
         landscape.compute_plm_embeddings(model_name=model_name)
         emb_array = landscape.get_embedding()
     if emb_array is None:
-        raise RuntimeError("No embeddings available on landscape and automatic computation failed.")
+        raise RuntimeError(
+            "No embeddings available on landscape and automatic computation failed."
+        )
 
     emb = torch.as_tensor(emb_array, dtype=torch.float32)
     ds = torch.utils.data.TensorDataset(emb, torch.zeros(len(emb), dtype=torch.long))
@@ -171,7 +254,9 @@ def infer_fitness_layer_from_landscape(
     model_device = device or next(model.parameters()).device
     if layer_kind == "prob_categorical":
         if not hasattr(model, "predict_with_uncertainty"):
-            raise ValueError(f"Model {model_type.__name__} must implement predict_with_uncertainty.")
+            raise ValueError(
+                f"Model {model_type.__name__} must implement predict_with_uncertainty."
+            )
         all_mean: list[torch.Tensor] = []
         all_var: list[torch.Tensor] = []
         with torch.no_grad():

@@ -1,7 +1,18 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union, Literal
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    Literal,
+)
 
 import torch
 import warnings
@@ -18,7 +29,28 @@ def _pad_tokens(
     *,
     pad_value: Union[int, float],
 ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-    """Pad token/attention tensors to a shared length."""
+    """
+    Pad token and attention tensors to a shared sequence length.
+
+    Parameters
+    ----------
+    tokens : list[Tensor]
+        Token tensors to be padded.
+    masks : list[Tensor | None]
+        Attention mask tensors aligned with ``tokens``.
+    pad_value : int or float
+        Value used when padding tokens or masks.
+
+    Returns
+    -------
+    tuple[list[Tensor], list[Tensor]]
+        Padded token tensors and attention masks with uniform length.
+
+    Raises
+    ------
+    RuntimeError
+        If any token or mask tensor is missing.
+    """
     max_len = max(int(t.shape[0]) for t in tokens if t is not None)
     padded_tokens: List[torch.Tensor] = []
     padded_masks: List[torch.Tensor] = []
@@ -29,7 +61,9 @@ def _pad_tokens(
             raise RuntimeError("Attention mask missing; cannot pad.")
         pad_len = max_len - int(tok.shape[0])
         if tok.dim() == 1:
-            padded_tokens.append(torch.nn.functional.pad(tok, (0, pad_len), value=pad_value))
+            padded_tokens.append(
+                torch.nn.functional.pad(tok, (0, pad_len), value=pad_value)
+            )
         else:
             padded_tokens.append(
                 torch.nn.functional.pad(tok, (0, 0, 0, pad_len), value=float(pad_value))
@@ -52,14 +86,38 @@ def embed_sequences(
     """
     Embed raw sequences using landscapy's ESM embedders.
 
+    Parameters
+    ----------
+    sequences : Sequence[SequenceLike]
+        Raw sequences to embed.
+    embedding_mode : {"hard", "soft"}, default="hard"
+        Tokenization/embedding strategy.
+    model_name : str, default="facebook/esm2_t6_8M_UR50D"
+        HuggingFace model identifier used by landscapy.
+    device : str or None, optional
+        Device string forwarded to the embedder.
+    embedding_batch_size : int, default=32
+        Batch size used during embedding.
+    include_tokens : bool, default=True
+        Whether to return token tensors and attention masks.
+
     Returns
     -------
     embeddings : torch.Tensor
-        Shape [N, D] embedding matrix.
-    tokens : list[Tensor] or None
-        Padded token tensors per sequence (or None if include_tokens=False).
-    attention_masks : list[Tensor] or None
-        Corresponding attention masks (or None if include_tokens=False).
+        Embedding matrix of shape ``(N, D)``.
+    tokens : list[torch.Tensor] or None
+        Padded token tensors per sequence, or ``None`` when ``include_tokens`` is ``False``.
+    attention_masks : list[torch.Tensor] or None
+        Attention masks aligned with ``tokens``, or ``None`` when ``include_tokens`` is ``False``.
+
+    Raises
+    ------
+    ValueError
+        If sequences are empty or an invalid embedding mode is provided.
+    ImportError
+        If landscapy embedders are unavailable.
+    RuntimeError
+        If embedding fails to produce outputs for every sequence.
     """
     if include_tokens and embedding_mode != "hard":
         warnings.warn(
@@ -85,7 +143,9 @@ def embed_sequences(
 
     try:
         if mode == "hard":
-            from fitness_landscape.embedding.hard_embedding import ESMEmbedder as HardESMEmbedder
+            from fitness_landscape.embedding.hard_embedding import (
+                ESMEmbedder as HardESMEmbedder,
+            )
 
             embedder = HardESMEmbedder(
                 model_name=model_name, device=device, batch_size=embedding_batch_size
@@ -94,7 +154,9 @@ def embed_sequences(
                 int(embedder.pad_token_id) if embedder.pad_token_id is not None else 0
             )
         else:
-            from fitness_landscape.embedding.soft_embedding import ESMEmbedder as SoftESMEmbedder
+            from fitness_landscape.embedding.soft_embedding import (
+                ESMEmbedder as SoftESMEmbedder,
+            )
 
             embedder = SoftESMEmbedder(
                 model_name=model_name, device=device, batch_size=embedding_batch_size
@@ -131,9 +193,13 @@ def embed_sequences(
     embedding_stack = torch.stack([emb for emb in embeddings], dim=0).float()
 
     if include_tokens:
-        if any(tok is None for tok in seq_tokens) or any(mask is None for mask in attn_masks):
+        if any(tok is None for tok in seq_tokens) or any(
+            mask is None for mask in attn_masks
+        ):
             raise RuntimeError("Tokenization failed for one or more sequences.")
-        padded_tokens, padded_masks = _pad_tokens(seq_tokens, attn_masks, pad_value=pad_value)
+        padded_tokens, padded_masks = _pad_tokens(
+            seq_tokens, attn_masks, pad_value=pad_value
+        )
         logger.info("Finished embedding %d sequences", len(seq_list))
         return embedding_stack, padded_tokens, padded_masks
 
@@ -153,8 +219,37 @@ def embed_sequences_to_records(
     include_tokens: bool = True,
 ) -> List[Dict[str, Any]]:
     """
-    Embed raw sequences using landscapy's ESM embedders and return records
-    matching FitnessLandscape.to_sequence_tensors output structure.
+    Embed raw sequences and emit FitnessLandscape-compatible record dictionaries.
+
+    Parameters
+    ----------
+    sequences : Sequence[SequenceLike]
+        Raw sequences to embed.
+    labels : Sequence[LabelLike]
+        Corresponding labels for each sequence.
+    label_key : str
+        Name of the label inside the output ``fitness_tensors`` mapping.
+    embedding_mode : {"hard", "soft"}, default="hard"
+        Tokenization/embedding strategy.
+    model_name : str, default="facebook/esm2_t6_8M_UR50D"
+        HuggingFace model identifier used by landscapy.
+    device : str or None, optional
+        Device string forwarded to the embedder.
+    embedding_batch_size : int, default=32
+        Batch size used during embedding.
+    include_tokens : bool, default=True
+        Whether to include padded token and attention mask tensors.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        Record dictionaries containing ``sequence_tensor`` or ``embedding``, ``fitness_tensors``,
+        and optional ``attention_mask``.
+
+    Raises
+    ------
+    ValueError
+        If the lengths of sequences and labels differ.
     """
     embeddings, tokens, masks = embed_sequences(
         sequences,
@@ -183,14 +278,35 @@ def embed_sequences_to_records(
 
 
 def _expand_batch_dict(batch: Mapping[str, Any]) -> List[Dict[str, Any]]:
-    """Convert batched dict from FitnessLandscape.to_sequence_tensors(as_batch=True) to list."""
+    """
+    Convert a batched dictionary into a list of per-sequence records.
+
+    Parameters
+    ----------
+    batch : Mapping[str, Any]
+        Dictionary returned by ``FitnessLandscape.to_sequence_tensors(as_batch=True)``.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        Per-sequence record dictionaries.
+
+    Raises
+    ------
+    ValueError
+        If required keys are missing from the batch.
+    """
     if "sequence_tensor" not in batch or "fitness_tensors" not in batch:
-        raise ValueError("Batch dictionary must contain 'sequence_tensor' and 'fitness_tensors'.")
+        raise ValueError(
+            "Batch dictionary must contain 'sequence_tensor' and 'fitness_tensors'."
+        )
     seqs = torch.as_tensor(batch["sequence_tensor"])
     fitness = {k: torch.as_tensor(v) for k, v in batch["fitness_tensors"].items()}
     n = seqs.shape[0]
     attention_mask = batch.get("attention_mask")
-    attention_mask_t = torch.as_tensor(attention_mask) if attention_mask is not None else None
+    attention_mask_t = (
+        torch.as_tensor(attention_mask) if attention_mask is not None else None
+    )
     embedding = batch.get("embedding")
     embedding_t = torch.as_tensor(embedding) if embedding is not None else None
 
@@ -209,7 +325,24 @@ def _expand_batch_dict(batch: Mapping[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _normalize_records(data: Any) -> List[Dict[str, Any]]:
-    """Normalize inputs to a list of per-sequence records."""
+    """
+    Normalize heterogeneous input into a list of per-sequence records.
+
+    Parameters
+    ----------
+    data : Any
+        Either ``None``, a mapping with batched tensors, or an iterable of record dictionaries.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        Normalized per-sequence records.
+
+    Raises
+    ------
+    ValueError
+        If the input does not conform to supported structures.
+    """
     if data is None:
         return []
     if isinstance(data, Mapping):
@@ -224,7 +357,16 @@ def _normalize_records(data: Any) -> List[Dict[str, Any]]:
 
 
 class SequenceClassificationDataset(Dataset):
-    """Dataset turning FitnessLandscape exports into (features, label) pairs."""
+    """
+    Dataset turning FitnessLandscape exports into ``(features, label)`` pairs.
+
+    Parameters
+    ----------
+    records : Sequence[Mapping[str, Any]]
+        Sequence of record dictionaries containing features and labels.
+    label_key : str
+        Key inside ``fitness_tensors`` to use as the target label.
+    """
 
     def __init__(self, records: Sequence[Mapping[str, Any]], label_key: str) -> None:
         if not records:
@@ -263,7 +405,36 @@ class SequenceClassificationDataset(Dataset):
 
 
 class SequenceClassificationDataModule(pl.LightningDataModule):
-    """Lightning DataModule for sequence classification."""
+    """
+    Lightning DataModule for sequence classification tasks.
+
+    Parameters
+    ----------
+    train_data : Any
+        Training records or batched mapping.
+    label_key : str
+        Label key used inside ``fitness_tensors``.
+    label_mapping : Sequence[str], optional
+        Optional category names.
+    val_data : Any, optional
+        Validation records or batched mapping.
+    test_data : Any, optional
+        Test records or batched mapping.
+    predict_data : Any, optional
+        Prediction records or batched mapping.
+    batch_size : int, default=32
+        Loader batch size.
+    num_workers : int, default=0
+        Number of workers for DataLoader.
+    pin_memory : bool, default=False
+        Whether to pin memory in DataLoaders.
+    shuffle : bool, default=True
+        Whether to shuffle training data.
+    val_split : float, default=0.0
+        Fraction of training records reserved for validation if ``val_data`` is empty.
+    val_seed : int, optional
+        Seed controlling the validation split.
+    """
 
     def __init__(
         self,
@@ -284,7 +455,9 @@ class SequenceClassificationDataModule(pl.LightningDataModule):
         super().__init__()
         self.train_records = _normalize_records(train_data)
         self.val_records = _normalize_records(val_data) if val_data is not None else []
-        self.test_records = _normalize_records(test_data) if test_data is not None else []
+        self.test_records = (
+            _normalize_records(test_data) if test_data is not None else []
+        )
         self.predict_records = (
             _normalize_records(predict_data) if predict_data is not None else []
         )
@@ -316,19 +489,27 @@ class SequenceClassificationDataModule(pl.LightningDataModule):
                 self.val_records = [self.train_records[i] for i in val_idx]
                 self.train_records = [self.train_records[i] for i in train_idx]
 
-            self._train_ds = SequenceClassificationDataset(self.train_records, self.label_key)
+            self._train_ds = SequenceClassificationDataset(
+                self.train_records, self.label_key
+            )
             if self.val_records:
-                self._val_ds = SequenceClassificationDataset(self.val_records, self.label_key)
+                self._val_ds = SequenceClassificationDataset(
+                    self.val_records, self.label_key
+                )
         if stage in (None, "test"):
             if self.test_records:
-                self._test_ds = SequenceClassificationDataset(self.test_records, self.label_key)
+                self._test_ds = SequenceClassificationDataset(
+                    self.test_records, self.label_key
+                )
         if stage in (None, "predict"):
             if self.predict_records:
                 self._predict_ds = SequenceClassificationDataset(
                     self.predict_records, self.label_key
                 )
 
-    def _loader(self, dataset: Optional[Dataset], shuffle: bool = False) -> Optional[DataLoader]:
+    def _loader(
+        self, dataset: Optional[Dataset], shuffle: bool = False
+    ) -> Optional[DataLoader]:
         if dataset is None:
             return None
         return DataLoader(
@@ -375,7 +556,50 @@ class SequenceClassificationDataModule(pl.LightningDataModule):
         **datamodule_kwargs: Any,
     ) -> "SequenceClassificationDataModule":
         """
-        Convenience constructor to embed raw sequences with landscapy before training.
+        Embed raw sequences with landscapy and construct a DataModule.
+
+        Parameters
+        ----------
+        train_sequences : Sequence[SequenceLike]
+            Raw sequences for training.
+        train_labels : Sequence[LabelLike]
+            Labels aligned with ``train_sequences``.
+        label_key : str
+            Label key used inside ``fitness_tensors``.
+        val_sequences : Sequence[SequenceLike], optional
+            Validation sequences.
+        val_labels : Sequence[LabelLike], optional
+            Validation labels.
+        test_sequences : Sequence[SequenceLike], optional
+            Test sequences.
+        test_labels : Sequence[LabelLike], optional
+            Test labels.
+        predict_sequences : Sequence[SequenceLike], optional
+            Sequences for prediction.
+        predict_labels : Sequence[LabelLike], optional
+            Optional labels for prediction records.
+        embedding_mode : {"hard", "soft"}, default="hard"
+            Tokenization/embedding strategy.
+        model_name : str, default="facebook/esm2_t6_8M_UR50D"
+            HuggingFace model identifier used by landscapy.
+        device : str or None, optional
+            Device string forwarded to the embedder.
+        embedding_batch_size : int, default=32
+            Batch size used during embedding.
+        include_tokens : bool, default=True
+            Whether to include token/attention tensors.
+        **datamodule_kwargs : Any
+            Additional keyword arguments forwarded to ``SequenceClassificationDataModule``.
+
+        Returns
+        -------
+        SequenceClassificationDataModule
+            Initialized DataModule containing embedded records.
+
+        Raises
+        ------
+        ValueError
+            If sequences and labels are not provided in matching pairs.
         """
 
         def _maybe_embed(

@@ -6,7 +6,32 @@ from typing import Any, Dict, Optional
 
 @dataclass
 class JobConfig:
-    """Hydra-structured config for training jobs."""
+    """
+    Hydra-structured configuration for training jobs.
+
+    Attributes
+    ----------
+    model : str
+        Registry key for the model factory to build.
+    data : str
+        Registry key for the data builder.
+    model_kwargs : Dict[str, Any]
+        Keyword arguments passed to the model factory.
+    data_kwargs : Dict[str, Any]
+        Keyword arguments passed to the data builder.
+    trainer_kwargs : Dict[str, Any]
+        Keyword arguments passed to the trainer factory (e.g., `create_trainer`).
+    log_file : Optional[str]
+        Optional path to a log file for package-level logging.
+    log_level : str
+        Logging level to configure for the package logger.
+    seed : Optional[int]
+        Optional global seed for deterministic runs.
+    fit : bool
+        Whether to run training via ``Trainer.fit``.
+    test : bool
+        Whether to run evaluation via ``Trainer.test``.
+    """
 
     model: str = "sequence_gp_classifier"
     data: str = "raw_sequences"

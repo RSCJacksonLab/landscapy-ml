@@ -45,6 +45,7 @@ setup(
             "flake8>=7.0",
             "black>=24.4",
             "isort>=5.13",
+            "pre-commit>=3.7",
         ],
         "tracking": ["wandb>=0.16"],
     },

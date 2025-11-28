@@ -10,24 +10,37 @@ from pytorch_lightning.loggers import TensorBoardLogger
 
 
 class SequenceGPModel(gpytorch.models.ApproximateGP):
-    """Variational GP model for sequence embeddings."""
+    """
+    Variational Gaussian process model for sequence embeddings.
+
+    Parameters
+    ----------
+    inducing_points : torch.Tensor
+        Initial inducing point locations of shape ``(num_inducing, num_features)``.
+    num_classes : int
+        Number of output classes/tasks.
+    """
 
     def __init__(self, inducing_points: torch.Tensor, num_classes: int) -> None:
         if inducing_points.dim() != 2:
-            raise ValueError("inducing_points must have shape [num_inducing, num_features]")
+            raise ValueError(
+                "inducing_points must have shape [num_inducing, num_features]"
+            )
 
         batch_shape = torch.Size([num_classes])
         variational_distribution = gpytorch.variational.CholeskyVariationalDistribution(
             inducing_points.size(-2), batch_shape=batch_shape
         )
-        variational_strategy = gpytorch.variational.IndependentMultitaskVariationalStrategy(
-            gpytorch.variational.VariationalStrategy(
-                self,
-                inducing_points,
-                variational_distribution,
-                learn_inducing_locations=True,
-            ),
-            num_tasks=num_classes,
+        variational_strategy = (
+            gpytorch.variational.IndependentMultitaskVariationalStrategy(
+                gpytorch.variational.VariationalStrategy(
+                    self,
+                    inducing_points,
+                    variational_distribution,
+                    learn_inducing_locations=True,
+                ),
+                num_tasks=num_classes,
+            )
         )
         super().__init__(variational_strategy)
         self.mean_module = gpytorch.means.ConstantMean(batch_shape=batch_shape)
@@ -36,14 +49,39 @@ class SequenceGPModel(gpytorch.models.ApproximateGP):
             batch_shape=batch_shape,
         )
 
-    def forward(self, inputs: torch.Tensor) -> gpytorch.distributions.MultivariateNormal:
+    def forward(
+        self, inputs: torch.Tensor
+    ) -> gpytorch.distributions.MultivariateNormal:
         mean_x = self.mean_module(inputs)
         covar_x = self.covar_module(inputs)
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
 
 class SequenceGPClassifier(pl.LightningModule):
-    """Lightning module wrapping a GPyTorch softmax classifier."""
+    """
+    Lightning module wrapping a variational GPyTorch softmax classifier.
+
+    Parameters
+    ----------
+    num_features : int
+        Feature dimension of the input embeddings.
+    num_classes : int
+        Number of output classes.
+    inducing_points : torch.Tensor, optional
+        Optional initial inducing point locations. If ``None``, random points are used.
+    num_inducing : int, default=64
+        Number of inducing points to initialize when ``inducing_points`` is ``None``.
+    learning_rate : float, default=0.01
+        Learning rate for the optimizer.
+    weight_decay : float, default=0.0
+        Weight decay for the optimizer.
+    num_data : int, optional
+        Optional dataset size hint for the ELBO; inferred lazily when ``None``.
+    embedding_domain : str, optional
+        Optional embedding domain metadata used for compatibility checks at inference time.
+    embedding_model : str, optional
+        Optional embedding model identifier used for compatibility checks at inference time.
+    """
 
     def __init__(
         self,
@@ -89,7 +127,9 @@ class SequenceGPClassifier(pl.LightningModule):
         self._val_class_correct: Optional[torch.Tensor] = None
         self._val_class_total: Optional[torch.Tensor] = None
 
-    def forward(self, inputs: torch.Tensor) -> gpytorch.distributions.MultivariateNormal:
+    def forward(
+        self, inputs: torch.Tensor
+    ) -> gpytorch.distributions.MultivariateNormal:
         return self.model(inputs)
 
     def _maybe_update_num_data(self, batch_size: int) -> None:
@@ -108,17 +148,25 @@ class SequenceGPClassifier(pl.LightningModule):
         with torch.no_grad():
             probs = self.likelihood(output).probs.mean(0)
             predictions = probs.argmax(dim=-1)
-            correct = (predictions == labels)
+            correct = predictions == labels
             accuracy = correct.float().mean()
             correct_per_class = torch.bincount(
                 labels[correct], minlength=self.num_classes
             )
             total_per_class = torch.bincount(labels, minlength=self.num_classes)
-        return loss, accuracy, probs, correct.sum().item(), labels.numel(), correct_per_class, total_per_class
+        return (
+            loss,
+            accuracy,
+            probs,
+            correct.sum().item(),
+            labels.numel(),
+            correct_per_class,
+            total_per_class,
+        )
 
     def training_step(self, batch, batch_idx: int):
-        loss, accuracy, _, correct, total, correct_per_class, total_per_class = self._shared_step(
-            batch
+        loss, accuracy, _, correct, total, correct_per_class, total_per_class = (
+            self._shared_step(batch)
         )
         self._train_correct += correct
         self._train_total += total
@@ -126,12 +174,14 @@ class SequenceGPClassifier(pl.LightningModule):
             self._train_class_correct += correct_per_class
             self._train_class_total += total_per_class
         self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=False)
-        self.log("train/acc_step", accuracy, prog_bar=False, on_step=True, on_epoch=False)
+        self.log(
+            "train/acc_step", accuracy, prog_bar=False, on_step=True, on_epoch=False
+        )
         return loss
 
     def validation_step(self, batch, batch_idx: int):
-        loss, accuracy, _, correct, total, correct_per_class, total_per_class = self._shared_step(
-            batch
+        loss, accuracy, _, correct, total, correct_per_class, total_per_class = (
+            self._shared_step(batch)
         )
         self._val_correct += correct
         self._val_total += total
@@ -146,7 +196,19 @@ class SequenceGPClassifier(pl.LightningModule):
         self.log("test/acc", accuracy, prog_bar=True, on_step=False, on_epoch=True)
 
     def predict(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Alias for predict_with_uncertainty for consistency across models."""
+        """
+        Predict class probabilities and variances for input embeddings.
+
+        Parameters
+        ----------
+        inputs : torch.Tensor
+            Input embedding matrix of shape ``(N, D)``.
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor]
+            Mean probabilities and variances per class.
+        """
         return self.predict_with_uncertainty(inputs)
 
     def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
@@ -160,7 +222,23 @@ class SequenceGPClassifier(pl.LightningModule):
     def predict_with_uncertainty(
         self, inputs: torch.Tensor, num_likelihood_samples: int = 32
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Return mean class probabilities and variance for given embeddings."""
+        """
+        Return mean class probabilities and variance for embeddings.
+
+        Parameters
+        ----------
+        inputs : torch.Tensor
+            Input embedding matrix of shape ``(N, D)``.
+        num_likelihood_samples : int, default=32
+            Number of likelihood samples used to estimate uncertainty.
+
+        Returns
+        -------
+        mean_probs : torch.Tensor
+            Mean class probabilities of shape ``(N, num_classes)``.
+        variance : torch.Tensor
+            Variance of class probabilities of shape ``(N, num_classes)``.
+        """
         self.model.eval()
         self.likelihood.eval()
         inputs = inputs.to(self.device)
@@ -200,7 +278,9 @@ class SequenceGPClassifier(pl.LightningModule):
             denom = torch.clamp(self._train_class_total, min=1)
             per_class = (self._train_class_correct / denom).float()
             macro = per_class.mean().item()
-            self.log("train/acc_macro", macro, prog_bar=False, on_step=False, on_epoch=True)
+            self.log(
+                "train/acc_macro", macro, prog_bar=False, on_step=False, on_epoch=True
+            )
             # Per-class accuracy logging for deeper inspection
             per_class_cpu = per_class.detach().cpu()
             self.log_dict(
@@ -219,7 +299,9 @@ class SequenceGPClassifier(pl.LightningModule):
             denom = torch.clamp(self._val_class_total, min=1)
             per_class = (self._val_class_correct / denom).float()
             macro = per_class.mean().item()
-            self.log("val/acc_macro", macro, prog_bar=False, on_step=False, on_epoch=True)
+            self.log(
+                "val/acc_macro", macro, prog_bar=False, on_step=False, on_epoch=True
+            )
             per_class_cpu = per_class.detach().cpu()
             self.log_dict(
                 {f"val/acc_class_{i}": float(v) for i, v in enumerate(per_class_cpu)},
@@ -251,7 +333,53 @@ def create_trainer(
     wandb_dir: Optional[str] = None,
     num_sanity_val_steps: int = 0,
 ) -> pl.Trainer:
-    """Convenience factory for a basic Lightning trainer with TensorBoard logging."""
+    """
+    Build a PyTorch Lightning ``Trainer`` with TensorBoard (and optional W&B) logging.
+
+    Parameters
+    ----------
+    max_epochs : int, default=50
+        Maximum number of training epochs.
+    accelerator : str or None, default="auto"
+        Accelerator passed to Lightning (e.g., ``"cpu"``, ``"gpu"``, or ``"auto"``).
+    devices : int or None, default=1
+        Number of devices to use; forwarded to Lightning.
+    log_every_n_steps : int, default=10
+        Logging frequency in steps.
+    log_dir : str, default="logs"
+        Base directory for TensorBoard logs.
+    experiment_name : str, default="landscapyml"
+        Experiment subdirectory name used by loggers.
+    checkpoint_dir : str, default="checkpoints"
+        Directory for model checkpoints.
+    checkpoint_monitor : str or None, default="val/loss"
+        Metric name to monitor for checkpointing. ``None`` disables checkpointing.
+    checkpoint_mode : str, default="min"
+        Whether to minimize or maximize the monitored metric.
+    checkpoint_every_n_epochs : int, default=1
+        Frequency in epochs for checkpointing.
+    save_top_k : int, default=1
+        Number of best checkpoints to keep.
+    use_wandb : bool, default=True
+        Whether to enable Weights & Biases logging (if available).
+    wandb_project : str, optional
+        Optional W&B project name.
+    wandb_entity : str, optional
+        Optional W&B entity/organization.
+    wandb_run_name : str, optional
+        Optional W&B run name.
+    wandb_tags : list[str], optional
+        Optional W&B tags.
+    wandb_dir : str, optional
+        Optional W&B log directory.
+    num_sanity_val_steps : int, default=0
+        Number of validation sanity steps to run before training.
+
+    Returns
+    -------
+    pytorch_lightning.Trainer
+        Configured Lightning trainer instance.
+    """
     tensorboard_logger = TensorBoardLogger(
         save_dir=log_dir,
         name=experiment_name,

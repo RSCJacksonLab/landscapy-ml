@@ -20,7 +20,9 @@ _MODEL_REGISTRY: Dict[str, ModelFactory] = {}
 _DATA_REGISTRY: Dict[str, DataFactory] = {}
 
 
-def register_model(name: str, factory: ModelFactory, *, overwrite: bool = False) -> None:
+def register_model(
+    name: str, factory: ModelFactory, *, overwrite: bool = False
+) -> None:
     if name in _MODEL_REGISTRY and not overwrite:
         raise ValueError(f"Model '{name}' is already registered.")
     _MODEL_REGISTRY[name] = factory
@@ -37,7 +39,9 @@ register_model("sequence_gp_classifier", SequenceGPClassifier, overwrite=True)
 register_model("sequence_mlp_classifier", SequenceMLPClassifier, overwrite=True)
 register_model("sequence_mlp_ensemble", SequenceMLPEnsembleClassifier, overwrite=True)
 # TODO: add additional models to the registry and expose selection in CLI/config.
-register_data("fitness_landscape_records", SequenceClassificationDataModule, overwrite=True)
+register_data(
+    "fitness_landscape_records", SequenceClassificationDataModule, overwrite=True
+)
 register_data(
     "raw_sequences",
     SequenceClassificationDataModule.from_sequences,
@@ -56,9 +60,25 @@ class TrainingJob:
     """
     Helper to construct and run training jobs in a consistent way.
 
-    This class keeps factories for models/data modules, builds them from
-    kwargs, and wires up a Lightning Trainer. A CLI can map parsed args to
-    the *_kwargs fields and pick a registry key for model/data.
+    The class wires together model/data/trainer factories and optional seeding,
+    mirroring how the CLI maps user-provided keyword arguments to registry keys.
+
+    Parameters
+    ----------
+    model_name : str
+        Registry key for the model factory.
+    data_name : str
+        Registry key for the data builder.
+    model_kwargs : dict[str, Any], optional
+        Keyword arguments forwarded to the model factory.
+    data_kwargs : dict[str, Any], optional
+        Keyword arguments forwarded to the data builder.
+    trainer_kwargs : dict[str, Any], optional
+        Keyword arguments forwarded to the trainer factory.
+    seed : int, optional
+        Optional global seed for deterministic runs.
+    trainer_factory : TrainerFactory, default=create_trainer
+        Factory used to build the Lightning trainer.
     """
 
     model_name: str
@@ -134,7 +154,9 @@ class TrainingJob:
         label_mapping = getattr(dm, "label_mapping", None)
         if label_mapping is not None:
             metadata["label_mapping"] = list(label_mapping)
-        for logger in trainer.loggers if isinstance(trainer.logger, list) else [trainer.logger]:
+        for logger in (
+            trainer.loggers if isinstance(trainer.logger, list) else [trainer.logger]
+        ):
             try:
                 logger.log_hyperparams(metadata)
             except Exception:

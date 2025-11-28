@@ -59,20 +59,61 @@ def train(ctx: click.Context, config_path: Path | None) -> None:
     "config-from-csv",
     help="Construct a Hydra config from a CSV with sequences and labels.",
 )
-@click.option("--csv-path", required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path))
-@click.option("--sequence-column", required=True, help="Column name containing raw sequences.")
-@click.option("--label-column", required=True, help="Column name containing class labels.")
-@click.option("--out-dir", type=click.Path(dir_okay=True, file_okay=False, path_type=Path), default=Path("landscapyml_run_conf"), show_default=True)
-@click.option("--embedding-mode", default="hard", show_default=True, help="Embedding mode: hard or soft.")
-@click.option("--model-name", default="facebook/esm2_t6_8M_UR50D", show_default=True, help="PLM model for embeddings.")
+@click.option(
+    "--csv-path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--sequence-column", required=True, help="Column name containing raw sequences."
+)
+@click.option(
+    "--label-column", required=True, help="Column name containing class labels."
+)
+@click.option(
+    "--out-dir",
+    type=click.Path(dir_okay=True, file_okay=False, path_type=Path),
+    default=Path("landscapyml_run_conf"),
+    show_default=True,
+)
+@click.option(
+    "--embedding-mode",
+    default="hard",
+    show_default=True,
+    help="Embedding mode: hard or soft.",
+)
+@click.option(
+    "--model-name",
+    default="facebook/esm2_t6_8M_UR50D",
+    show_default=True,
+    help="PLM model for embeddings.",
+)
 @click.option("--max-epochs", default=5, show_default=True, help="Max training epochs.")
-@click.option("--use-wandb/--no-wandb", default=True, show_default=True, help="Enable Weights & Biases logging.")
-@click.option("--wandb-project", default=None, help="W&B project name (None = use wandb default).")
+@click.option(
+    "--use-wandb/--no-wandb",
+    default=True,
+    show_default=True,
+    help="Enable Weights & Biases logging.",
+)
+@click.option(
+    "--wandb-project", default=None, help="W&B project name (None = use wandb default)."
+)
 @click.option("--wandb-run-name", default=None, help="W&B run name.")
 @click.option("--seed", default=None, type=int, help="Optional seed.")
-@click.option("--val-split", default=0.1, show_default=True, type=float, help="Fraction of training used for validation when no val data provided.")
+@click.option(
+    "--val-split",
+    default=0.1,
+    show_default=True,
+    type=float,
+    help="Fraction of training used for validation when no val data provided.",
+)
 @click.option("--val-seed", default=None, type=int, help="Optional seed for val split.")
-@click.option("--model-key", default="sequence_gp_classifier", show_default=True, help="Registered model key to use (e.g., sequence_gp_classifier, sequence_mlp_classifier).")
+@click.option(
+    "--model-key",
+    default="sequence_gp_classifier",
+    show_default=True,
+    help="Registered model key to use (e.g., sequence_gp_classifier, sequence_mlp_classifier).",
+)
 def config_from_csv(
     csv_path: Path,
     sequence_column: str,

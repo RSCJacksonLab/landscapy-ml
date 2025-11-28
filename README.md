@@ -11,6 +11,8 @@ pip install landscapy-ml
 pip install .
 # development mode
 pip install -e ".[dev]"
+# enable formatting hooks
+pre-commit install
 ```
 
 ## Quick start

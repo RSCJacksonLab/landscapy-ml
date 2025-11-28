@@ -64,18 +64,30 @@ def _run_job(cfg: JobConfig, base_dir: Optional[Path] = None) -> None:
 
 def run_with_hydra(overrides: Optional[Iterable[str]] = None) -> int:
     """
-    Programmatic entry point to run the Hydra-configured training job.
+    Run a Hydra-configured training job programmatically.
 
-    Overrides are standard Hydra key=value strings (e.g., 'model_kwargs.num_classes=4').
+    Parameters
+    ----------
+    overrides : Iterable[str], optional
+        Sequence of Hydra override strings (for example ``\"model_kwargs.num_classes=4\"``).
+
+    Returns
+    -------
+    int
+        Exit code returned by Hydra (0 on success).
     """
     config_dir = Path(_config_path()).resolve()
     if not config_dir.is_dir():
-        raise RuntimeError(f"Config path {config_dir} is not a directory containing config.yaml")
+        raise RuntimeError(
+            f"Config path {config_dir} is not a directory containing config.yaml"
+        )
 
     over = list(overrides) if overrides else []
 
     try:
-        with initialize_config_dir(version_base=None, config_dir=str(config_dir), job_name="landscapyml"):
+        with initialize_config_dir(
+            version_base=None, config_dir=str(config_dir), job_name="landscapyml"
+        ):
             cfg = compose(config_name="config", overrides=over)
         job_cfg = OmegaConf.to_object(cfg)
         if not isinstance(job_cfg, JobConfig):
