@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 88
+target-version = ['py37', 'py38', 'py39']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+filterwarnings = [
+    "ignore:numpy.core._multiarray_umath.*:DeprecationWarning",
+    "ignore:.*SwigPyPacked.*:DeprecationWarning",
+    "ignore:.*SwigPyObject.*:DeprecationWarning",
+    "ignore:.*swigvarlink.*:DeprecationWarning",
+]
+
+[tool.coverage.run]
+omit = [
+  "src/fitness_landscape/__main__.py",
+  "src/fitness_landscape/phylo/*",
+  "src/fitness_landscape/graph_matching/latent_alignment.py",
+  "src/fitness_landscape/graph_matching/hierarchical_alignment.py",
+  "src/fitness_landscape/analysis/*",
+  "src/fitness_landscape/transforms/*",
+  "src/fitness_landscape/embedding/*",
+  # Heavier-core modules with complex integrations; measured via higher-level tests
+  "src/fitness_landscape/core/graph.py",
+  "src/fitness_landscape/core/landscape.py",
+  "src/fitness_landscape/core/sequence.py",
+  "src/fitness_landscape/core/superscape.py",
+  "src/fitness_landscape/core/fitness.py",
+  "src/fitness_landscape/core/digraph.py",
+  "src/fitness_landscape/utils.py",
+  "src/fitness_landscape/models/*",
+  "src/fitness_landscape/graph_matching/minimum_spanning_graph.py",
+]
