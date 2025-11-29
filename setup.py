@@ -28,7 +28,9 @@ setup(
     packages=find_packages(where="src"),
     python_requires=">=3.10",
     install_requires=[
-        "landscapy @ git+https://github.com/RSCJacksonLab/landscapy.git@dev",
+        # landscapy is optional here to avoid resolver conflicts when the base
+        # package already exists in editable form. Use the "isolated" extra to
+        # pull landscapy automatically when needed.
         "click>=8.1",
         "hydra-core>=1.3",
         "torch>=2.2",
@@ -48,5 +50,9 @@ setup(
             "pre-commit>=3.7",
         ],
         "tracking": ["wandb>=0.16"],
+        "isolated": [
+            # When installing stand-alone, pull landscapy from the dev branch.
+            "landscapy @ git+https://github.com/RSCJacksonLab/landscapy.git@dev"
+        ],
     },
 )
