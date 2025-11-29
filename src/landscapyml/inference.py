@@ -16,6 +16,20 @@ except Exception:  # pragma: no cover - optional dependency
     ProbabilisticCategoricalFitness = Any  # type: ignore
 
 
+def _resolve_embedding_info(landscape: Any) -> Tuple[Optional[str], Optional[str], Optional[Mapping[str, Any]]]:
+    domain = getattr(landscape, "active_embedding_domain", getattr(landscape, "_active_embedding_domain", None))
+    meta = None
+    if hasattr(landscape, "get_embedding_metadata"):
+        try:
+            meta = landscape.get_embedding_metadata(domain)
+        except Exception:
+            meta = None
+    model_name = getattr(landscape, "embedding_model", None)
+    if meta is not None and meta.get("model_name"):
+        model_name = meta.get("model_name")
+    return domain, model_name, meta
+
+
 def predict_sequences(
     model: SequenceGPClassifier,
     sequences: Sequence[Any],
@@ -224,8 +238,7 @@ def infer_fitness_layer_from_landscape(
 
     expected_domain = getattr(model, "embedding_domain", None)
     expected_model = getattr(model, "embedding_model", None)
-    active_domain = getattr(landscape, "_active_embedding_domain", None)
-    active_model = getattr(landscape, "embedding_model", None)
+    active_domain, active_model, active_meta = _resolve_embedding_info(landscape)
     if expected_domain and active_domain and expected_domain != active_domain:
         raise ValueError(
             f"Embedding domain mismatch: model expects {expected_domain}, landscape active is {active_domain}."
@@ -237,9 +250,13 @@ def infer_fitness_layer_from_landscape(
 
     emb_array = landscape.get_embedding()
     if emb_array is None:
-        model_name = expected_model or "facebook/esm2_t6_8M_UR50D"
+        fallback_model = None
+        if isinstance(active_meta, Mapping):
+            fallback_model = active_meta.get("model_name")
+        model_name = expected_model or fallback_model or "facebook/esm2_t6_8M_UR50D"
         landscape.compute_plm_embeddings(model_name=model_name)
         emb_array = landscape.get_embedding()
+        active_domain, active_model, active_meta = _resolve_embedding_info(landscape)
     if emb_array is None:
         raise RuntimeError(
             "No embeddings available on landscape and automatic computation failed."
@@ -284,10 +301,20 @@ def infer_fitness_layer_from_landscape(
         "embedding_domain": active_domain or expected_domain,
         "embedding_model": active_model or expected_model,
     }
+    if isinstance(active_meta, Mapping) and "embedding_mode" in active_meta:
+        meta["embedding_mode"] = active_meta["embedding_mode"]
     layer = adapter(outputs, categories, meta, layer_name)
 
     if attach and hasattr(landscape, "attach"):
         target = landscape if inplace else landscape.copy()
+        target_layer_name = layer_name
+        if hasattr(landscape, "safe_layer_name"):
+            try:
+                target_layer_name = landscape.safe_layer_name(layer_name)
+            except Exception:
+                target_layer_name = layer_name
+        if hasattr(layer, "name"):
+            layer.name = target_layer_name
         target.attach(layer=layer)
         return layer
 

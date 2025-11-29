@@ -16,6 +16,10 @@ from .data_utils import (
     write_config,
     CSVConfigRequest,
 )
+from .landscape_adapter import (
+    records_from_landscape,
+    datamodule_from_landscape,
+)
 
 __all__ = [
     "SequenceGPClassifier",
@@ -36,4 +40,6 @@ __all__ = [
     "build_config_from_csv",
     "write_config",
     "CSVConfigRequest",
+    "records_from_landscape",
+    "datamodule_from_landscape",
 ]
