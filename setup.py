@@ -38,6 +38,7 @@ setup(
         "pytorch-lightning>=2.3",
         "numpy>=1.24",
         "scipy>=1.10",
+        "tensorboard>=2.20"
     ],
     extras_require={
         "dev": [
