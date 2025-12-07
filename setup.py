@@ -26,6 +26,7 @@ setup(
     ],
     package_dir={"": "src"},
     packages=find_packages(where="src"),
+    package_data={"landscapyml": ["conf/*.yaml"]},
     python_requires=">=3.10",
     install_requires=[
         # landscapy is optional here to avoid resolver conflicts when the base

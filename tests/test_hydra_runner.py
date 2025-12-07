@@ -3,7 +3,7 @@ from pathlib import Path
 import torch
 
 from landscapyml.config import JobConfig
-from landscapyml.hydra_runner import _run_job
+from landscapyml.hydra_runner import _config_path, _run_job
 
 
 def test_run_job_executes_without_training(tmp_path):
@@ -33,3 +33,10 @@ def test_run_job_executes_without_training(tmp_path):
     # Ensure label mapping was persisted next to checkpoints
     mapping = tmp_path / "ckpts" / "label_mapping.json"
     assert mapping.exists()
+
+
+def test_config_path_defaults_to_packaged_conf(monkeypatch):
+    monkeypatch.delenv("LANDSCAPYML_CONFIG_PATH", raising=False)
+    conf_dir = Path(_config_path())
+    assert conf_dir.joinpath("config.yaml").is_file()
+    assert "landscapyml" in conf_dir.parts

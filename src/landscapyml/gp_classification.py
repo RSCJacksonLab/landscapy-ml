@@ -9,6 +9,57 @@ import torch
 from pytorch_lightning.loggers import TensorBoardLogger
 
 
+class FeatureNormalizer(torch.nn.Module):
+    """
+    Track running mean/variance and standardize inputs.
+
+    This keeps deterministic buffers (no learnable params) so that the same
+    transform can be applied at inference.
+    """
+
+    def __init__(self, num_features: int, eps: float = 1e-6) -> None:
+        super().__init__()
+        if num_features <= 0:
+            raise ValueError("num_features must be positive.")
+        self.register_buffer("mean", torch.zeros(num_features))
+        self.register_buffer("var", torch.ones(num_features))
+        self.register_buffer("count", torch.tensor(0.0))
+        self.eps = eps
+
+    @property
+    def fitted(self) -> bool:
+        return bool(self.count.item() > 0)
+
+    def reset(self) -> None:
+        self.mean.zero_()
+        self.var.fill_(1.0)
+        self.count.zero_()
+
+    def update(self, x: torch.Tensor) -> None:
+        """Update running stats from a batch."""
+        with torch.no_grad():
+            if x.ndim == 1:
+                x = x.unsqueeze(0)
+            batch_count = float(x.shape[0])
+            if batch_count == 0:
+                return
+            batch_mean = x.mean(dim=0)
+            batch_var = x.var(dim=0, unbiased=False)
+            total = self.count + batch_count
+            delta = batch_mean - self.mean
+            new_mean = self.mean + delta * batch_count / total
+            m_a = self.var * self.count
+            m_b = batch_var * batch_count
+            m2 = m_a + m_b + delta.pow(2) * self.count * batch_count / total
+            new_var = m2 / total
+            self.mean.copy_(new_mean)
+            self.var.copy_(new_var)
+            self.count.copy_(total)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return (x - self.mean) / torch.sqrt(self.var + self.eps)
+
+
 class SequenceGPModel(gpytorch.models.ApproximateGP):
     """
     Variational Gaussian process model for sequence embeddings.
@@ -81,6 +132,11 @@ class SequenceGPClassifier(pl.LightningModule):
         Optional embedding domain metadata used for compatibility checks at inference time.
     embedding_model : str, optional
         Optional embedding model identifier used for compatibility checks at inference time.
+    normalize_features : bool, default=True
+        Whether to standardize input embeddings before feeding them to the GP.
+    normalization_fit_batches : int, optional
+        Maximum number of training batches used to fit normalization statistics at the
+        start of training. ``None`` uses the full training loader once.
     """
 
     def __init__(
@@ -95,6 +151,8 @@ class SequenceGPClassifier(pl.LightningModule):
         num_data: Optional[int] = None,
         embedding_domain: Optional[str] = None,
         embedding_model: Optional[str] = None,
+        normalize_features: bool = True,
+        normalization_fit_batches: Optional[int] = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["inducing_points"])
@@ -126,11 +184,59 @@ class SequenceGPClassifier(pl.LightningModule):
         self._train_class_total: Optional[torch.Tensor] = None
         self._val_class_correct: Optional[torch.Tensor] = None
         self._val_class_total: Optional[torch.Tensor] = None
+        self.normalize_features = normalize_features
+        self.normalization_fit_batches = normalization_fit_batches
+        self.normalizer = FeatureNormalizer(num_features) if normalize_features else None
 
     def forward(
         self, inputs: torch.Tensor
     ) -> gpytorch.distributions.MultivariateNormal:
+        inputs = self._normalize_inputs(inputs)
         return self.model(inputs)
+
+    def _normalize_inputs(self, inputs: torch.Tensor, *, update_stats: bool = False):
+        if not self.normalize_features or self.normalizer is None:
+            return inputs
+        if update_stats:
+            self.normalizer.update(inputs)
+        return self.normalizer(inputs)
+
+    def _inducing_points(self) -> torch.Tensor:
+        strategy = self.model.variational_strategy
+        # IndependentMultitaskVariationalStrategy wraps a base strategy.
+        base_strategy = getattr(strategy, "base_variational_strategy", strategy)
+        return base_strategy.inducing_points
+
+    def _normalize_inducing_points(self) -> None:
+        if not self.normalize_features or self.normalizer is None:
+            return
+        inducing = self._inducing_points()
+        with torch.no_grad():
+            normalized = self.normalizer(inducing)
+            inducing.data.copy_(normalized)
+
+    def _fit_normalizer_from_train_loader(self) -> None:
+        """
+        Fit normalization stats from the training loader once before training.
+
+        Avoids per-step drift while keeping inference deterministic.
+        """
+        if not self.normalize_features or self.normalizer is None:
+            return
+        if self.normalizer.fitted:
+            return
+        if self.trainer is None or self.trainer.datamodule is None:
+            return
+        loader = self.trainer.datamodule.train_dataloader()
+        max_batches = self.normalization_fit_batches
+        device = self.device
+        for idx, batch in enumerate(loader):
+            feats = batch[0] if isinstance(batch, (tuple, list)) else batch
+            feats = feats.to(device)
+            self._normalize_inputs(feats, update_stats=True)
+            if max_batches is not None and (idx + 1) >= max_batches:
+                break
+        self._normalize_inducing_points()
 
     def _maybe_update_num_data(self, batch_size: int) -> None:
         if self._num_data is None and self.trainer is not None:
@@ -143,7 +249,7 @@ class SequenceGPClassifier(pl.LightningModule):
         inputs, labels = batch
         labels = labels.long().view(-1)
         self._maybe_update_num_data(inputs.size(0))
-        output = self.model(inputs)
+        output = self(inputs)
         loss = -self.elbo(output, labels)
         with torch.no_grad():
             probs = self.likelihood(output).probs.mean(0)
@@ -214,7 +320,7 @@ class SequenceGPClassifier(pl.LightningModule):
     def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
         inputs, _ = batch
         with torch.no_grad():
-            posterior = self.likelihood(self.model(inputs))
+            posterior = self.likelihood(self(inputs))
             probs = posterior.probs.mean(0)
             variance = posterior.probs.var(0)
         return probs, variance
@@ -242,10 +348,11 @@ class SequenceGPClassifier(pl.LightningModule):
         self.model.eval()
         self.likelihood.eval()
         inputs = inputs.to(self.device)
+        inputs = self._normalize_inputs(inputs)
         with torch.no_grad(), gpytorch.settings.num_likelihood_samples(
             num_likelihood_samples
         ):
-            posterior = self.likelihood(self.model(inputs))
+            posterior = self.likelihood(self(inputs))
             probs = posterior.probs
             mean_probs = probs.mean(0)
             variance = probs.var(0)
@@ -259,6 +366,8 @@ class SequenceGPClassifier(pl.LightningModule):
         )
 
     def on_train_epoch_start(self):
+        if self.trainer is not None and self.trainer.global_step == 0:
+            self._fit_normalizer_from_train_loader()
         self._train_correct = 0
         self._train_total = 0
         self._train_class_correct = torch.zeros(self.num_classes, device=self.device)

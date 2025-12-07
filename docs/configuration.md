@@ -3,7 +3,7 @@
 Hydra drives training and testing. The structured config schema is defined in `config.JobConfig` and registered with Hydra in `hydra_runner.py`.
 
 ## Default config
-The baseline config lives at `conf/config.yaml`. Key fields:
+The baseline config ships inside the package at `landscapyml/conf/config.yaml` (also available at the repo root `conf/config.yaml`). Key fields:
 - `model`: Registry key for the model factory (see `trainer.py`). Default `sequence_gp_classifier`.
 - `data`: Registry key for the data builder. Default `raw_sequences` (embeds raw sequences before training).
 - `model_kwargs`: Passed to the selected model factory (e.g., `num_classes`, `num_inducing`).
@@ -17,8 +17,10 @@ Hydra settings under `hydra.run.dir` control the output directory naming (`outpu
 
 ## Locating configs
 `hydra_runner._config_path` resolves the config directory in order:
-1. Environment variable `LANDSCAPYML_CONFIG_PATH` (may point at a directory or the parent of `config.yaml`).
-2. Project default `conf/` next to the package source.
+1. Environment variable `LANDSCAPYML_CONFIG_PATH` (may point at a directory or directly at `config.yaml`).
+2. Packaged config at `landscapyml/conf`.
+3. Repository `conf/` when running from source.
+4. `conf/` under the current working directory.
 
 The CLI's `--config-path` flag sets `LANDSCAPYML_CONFIG_PATH` before invoking Hydra.
 

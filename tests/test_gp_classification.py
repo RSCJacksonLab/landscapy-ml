@@ -20,6 +20,22 @@ def test_sequence_gp_classifier_forward_and_predict():
     assert var.shape == (4, 2)
 
 
+def test_sequence_gp_classifier_normalizes_inputs_and_inducing_points():
+    model = SequenceGPClassifier(num_features=3, num_classes=2, num_inducing=2)
+    assert model.normalizer is not None
+    batch = torch.tensor([[1.0, 3.0, 5.0], [3.0, 5.0, 7.0]])
+    # Fit stats and check transform
+    model._normalize_inputs(batch, update_stats=True)
+    mean = model.normalizer.mean.clone()
+    var = model.normalizer.var.clone()
+    before = model._inducing_points().detach().clone()
+    model._normalize_inducing_points()
+    after = model._inducing_points()
+    expected = (batch - mean) / torch.sqrt(var + model.normalizer.eps)
+    assert torch.allclose(model._normalize_inputs(batch), expected)
+    assert not torch.allclose(before, after)
+
+
 def test_sequence_gp_model_shapes():
     inducing = torch.randn(3, 2)
     gp_model = SequenceGPModel(inducing_points=inducing, num_classes=2)
