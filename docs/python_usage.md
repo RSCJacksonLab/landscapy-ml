@@ -56,6 +56,24 @@ job = TrainingJob(
 trainer, model, dm = job.run(fit=True, test=False)
 ```
 
+## External LightningModule
+Load a LightningModule by class path without registering custom code:
+```python
+from landscapyml import TrainingJob
+
+job = TrainingJob(
+    model_name="external",
+    data_name="fitness_landscape_records",
+    model_kwargs={
+        "class_path": "mypkg.models.MyLightningModule",
+        "init_kwargs": {"num_classes": 2},
+    },
+    data_kwargs={"train_data": records, "label_key": "label"},
+    trainer_kwargs={"max_epochs": 5},
+)
+trainer, model, dm = job.run()
+```
+
 ## Build configs programmatically
 Use the helpers in `data_utils` when you need a Hydra config file for CLI runs or reproducibility.
 ```python

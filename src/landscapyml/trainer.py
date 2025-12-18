@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 
+import importlib
 import json
 from pathlib import Path
 import pytorch_lightning as pl
@@ -16,16 +17,29 @@ ModelFactory = Callable[..., pl.LightningModule]
 DataFactory = Callable[..., pl.LightningDataModule]
 TrainerFactory = Callable[..., pl.Trainer]
 
-_MODEL_REGISTRY: Dict[str, ModelFactory] = {}
+
+@dataclass(frozen=True)
+class ModelRegistryEntry:
+    factory: ModelFactory
+    requires_num_features: bool = True
+
+
+_MODEL_REGISTRY: Dict[str, ModelRegistryEntry] = {}
 _DATA_REGISTRY: Dict[str, DataFactory] = {}
 
 
 def register_model(
-    name: str, factory: ModelFactory, *, overwrite: bool = False
+    name: str,
+    factory: ModelFactory,
+    *,
+    overwrite: bool = False,
+    requires_num_features: bool = True,
 ) -> None:
     if name in _MODEL_REGISTRY and not overwrite:
         raise ValueError(f"Model '{name}' is already registered.")
-    _MODEL_REGISTRY[name] = factory
+    _MODEL_REGISTRY[name] = ModelRegistryEntry(
+        factory=factory, requires_num_features=requires_num_features
+    )
 
 
 def register_data(name: str, factory: DataFactory, *, overwrite: bool = False) -> None:
@@ -38,6 +52,60 @@ def register_data(name: str, factory: DataFactory, *, overwrite: bool = False) -
 register_model("sequence_gp_classifier", SequenceGPClassifier, overwrite=True)
 register_model("sequence_mlp_classifier", SequenceMLPClassifier, overwrite=True)
 register_model("sequence_mlp_ensemble", SequenceMLPEnsembleClassifier, overwrite=True)
+# External class-path model loader (expects a LightningModule or adapter).
+
+
+def _load_object(path: str) -> Any:
+    if "." not in path:
+        raise ValueError(
+            "class_path must be a fully qualified module path, e.g. mypkg.models.MyModel"
+        )
+    module_path, attr = path.rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    try:
+        return getattr(module, attr)
+    except AttributeError as exc:
+        raise ImportError(f"Could not find '{attr}' in module '{module_path}'.") from exc
+
+
+def build_external_model(
+    *,
+    class_path: str,
+    init_args: Optional[Sequence[Any]] = None,
+    init_kwargs: Optional[Dict[str, Any]] = None,
+    adapter_path: Optional[str] = None,
+    adapter_args: Optional[Sequence[Any]] = None,
+    adapter_kwargs: Optional[Dict[str, Any]] = None,
+    **extra_kwargs: Any,
+) -> pl.LightningModule:
+    """
+    Instantiate a LightningModule from a class path, with optional adapter wrapping.
+
+    ``extra_kwargs`` are merged into ``init_kwargs`` for convenience.
+    """
+    target = _load_object(class_path)
+    args = list(init_args) if init_args is not None else []
+    kwargs = dict(init_kwargs or {})
+    kwargs.update(extra_kwargs)
+    model = target(*args, **kwargs)
+
+    if adapter_path:
+        adapter = _load_object(adapter_path)
+        adapter_args = list(adapter_args) if adapter_args is not None else []
+        adapter_kwargs = dict(adapter_kwargs or {})
+        model = adapter(model, *adapter_args, **adapter_kwargs)
+
+    if not isinstance(model, pl.LightningModule):
+        raise TypeError(
+            "External model must be a LightningModule. "
+            "Provide an adapter that wraps the model into a LightningModule."
+        )
+    return model
+
+
+register_model(
+    "external", build_external_model, overwrite=True, requires_num_features=False
+)
 # TODO: add additional models to the registry and expose selection in CLI/config.
 register_data(
     "fitness_landscape_records", SequenceClassificationDataModule, overwrite=True
@@ -120,12 +188,12 @@ class TrainingJob:
         return int(features.shape[-1])
 
     def _build_model(self, dm: pl.LightningDataModule) -> pl.LightningModule:
-        factory = _MODEL_REGISTRY[self.model_name]
+        entry = _MODEL_REGISTRY[self.model_name]
         kwargs = dict(self.model_kwargs)
-        if "num_features" not in kwargs:
+        if entry.requires_num_features and "num_features" not in kwargs:
             kwargs["num_features"] = self._infer_num_features(dm)
         try:
-            return factory(**kwargs)
+            return entry.factory(**kwargs)
         except TypeError as exc:
             raise TypeError(
                 f"Failed to build model '{self.model_name}' with kwargs {kwargs!r}."

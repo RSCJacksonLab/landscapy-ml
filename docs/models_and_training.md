@@ -18,9 +18,9 @@
 
 ## Registries
 `trainer.py` maintains registries that map string keys to factories:
-- Models: `sequence_gp_classifier`, `sequence_mlp_classifier`, `sequence_mlp_ensemble`.
+- Models: `sequence_gp_classifier`, `sequence_mlp_classifier`, `sequence_mlp_ensemble`, `external`.
 - Data builders: `fitness_landscape_records`, `raw_sequences` (`SequenceClassificationDataModule.from_sequences`), `fitness_landscape` (alias for direct record usage).
-Use `register_model(name, factory, overwrite=False)` or `register_data(name, factory, overwrite=False)` to extend the set of available components. Factories must accept the kwargs passed via Hydra or `TrainingJob`. Example:
+Use `register_model(name, factory, overwrite=False, requires_num_features=True)` or `register_data(name, factory, overwrite=False)` to extend the set of available components. Set `requires_num_features=False` for models that should not auto-infer feature dimensions. Factories must accept the kwargs passed via Hydra or `TrainingJob`. Example:
 ```python
 from landscapyml import register_model, register_data
 from landscapyml.trainer import TrainingJob
@@ -46,6 +46,25 @@ job = TrainingJob(
 )
 trainer, model, dm = job.run()
 ```
+
+## External models
+The `external` model entry instantiates a LightningModule by class path and optional adapter:
+```python
+from landscapyml import TrainingJob
+
+job = TrainingJob(
+    model_name="external",
+    data_name="fitness_landscape_records",
+    model_kwargs={
+        "class_path": "mypkg.models.MyLightningModule",
+        "init_kwargs": {"num_classes": 3},
+    },
+    data_kwargs={"train_data": records, "label_key": "label"},
+    trainer_kwargs={"max_epochs": 10},
+)
+trainer, model, dm = job.run()
+```
+If the external class is not a LightningModule, supply an adapter via `model_kwargs.adapter_path` that wraps the model into a LightningModule.
 
 ## TrainingJob workflow
 `TrainingJob` (dataclass in `trainer.py`) coordinates building the data module, model, and trainer from provided kwargs and registry keys.

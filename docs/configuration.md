@@ -32,3 +32,9 @@ Pass standard Hydra overrides at the CLI or programmatically through `run_with_h
 - Change the model and class count: `model=sequence_mlp_classifier model_kwargs.num_classes=3`
 - Adjust validation split: `data_kwargs.val_split=0.2 data_kwargs.val_seed=42`
 - Disable W&B: `trainer_kwargs.use_wandb=false`
+
+## External models
+To load an external LightningModule by class path, set `model=external` and provide a `class_path` plus optional constructor args:
+- `model=external model_kwargs.class_path=mypkg.models.MyModule model_kwargs.num_classes=3`
+- Or pass nested kwargs: `model_kwargs.class_path=mypkg.models.MyModule model_kwargs.init_kwargs.num_classes=3`
+- If the external class is not a LightningModule, provide an adapter wrapper via `model_kwargs.adapter_path`.

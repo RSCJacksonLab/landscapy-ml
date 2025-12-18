@@ -15,6 +15,10 @@ This is a lightweight catalog of the public symbols exported from `landscapyml._
 ## Inference helpers
 - `predict_sequences`, `predict_landscape_records` (`inference.py`).
 
+## Adapters
+- `ModelAdapter`, `LandscapeInputAdapter`, `LandscapeOutputAdapter` (`adapters.py`).
+- `register_model_adapter`, `register_model_layer_mapping`, `register_input_adapter`, `register_output_adapter`, `register_layer_adapter` (`adapters.py`).
+
 ## CLI entry points
 - `python -m landscapyml` (via `__main__.py`): exposes `list`, `train`, `config-from-csv` commands.
 - `hydra_runner.run_with_hydra(overrides=None)`: programmatic Hydra entry.

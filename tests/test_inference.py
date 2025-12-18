@@ -5,6 +5,7 @@ from landscapyml.inference import (
     infer_fitness_layer_from_landscape,
     predict_landscape_records,
     predict_sequences,
+    register_model_adapter,
     register_layer_adapter,
     register_model_layer_mapping,
 )
@@ -59,7 +60,7 @@ def test_infer_fitness_layer_from_landscape_with_stub(monkeypatch):
             self.metadata = metadata
 
     monkeypatch.setattr(
-        "landscapyml.inference.ProbabilisticCategoricalFitness", StubFitness
+        "landscapyml.adapters.ProbabilisticCategoricalFitness", StubFitness
     )
 
     embeddings = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float)
@@ -109,3 +110,44 @@ def test_custom_layer_adapter_registration(monkeypatch):
         attach=False,
     )
     assert layer["name"] == "predicted_fitness"
+
+
+def test_model_adapter_registration(monkeypatch):
+    class StubFitness:
+        def __init__(self, name, probabilities, categories, metadata):
+            self.name = name
+            self.probabilities = probabilities
+            self.categories = categories
+            self.metadata = metadata
+
+    monkeypatch.setattr(
+        "landscapyml.adapters.ProbabilisticCategoricalFitness", StubFitness
+    )
+
+    class DummyModel(torch.nn.Module):
+        def forward(self, x):
+            return x
+
+    class DummyAdapter:
+        layer_kind = "prob_categorical"
+
+        def __init__(self, model):
+            self.model = model
+
+        def predict(self, inputs):
+            mean = torch.ones(inputs.shape[0], 1)
+            var = torch.zeros_like(mean)
+            return {"mean": mean, "var": var}
+
+    register_model_adapter(DummyModel, lambda model: DummyAdapter(model), overwrite=True)
+
+    landscape = DummyLandscape(np.array([[0.5], [1.0]], dtype=float))
+    layer = infer_fitness_layer_from_landscape(
+        landscape,
+        DummyModel(),
+        batch_size=1,
+        categories=["only"],
+        attach=False,
+    )
+    assert isinstance(layer, StubFitness)
+    assert layer.probabilities.shape == (2, 1)

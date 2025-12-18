@@ -1,12 +1,23 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Mapping, Optional, Sequence, Tuple, Type
+from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
 
 import torch
 
+from .adapters import (
+    LandscapeInputAdapter,
+    ModelAdapter,
+    infer_device,
+    normalize_adapter_outputs,
+    register_layer_adapter,
+    register_model_adapter,
+    register_model_layer_mapping,
+    resolve_input_adapter,
+    resolve_model_adapter,
+    resolve_output_adapter,
+)
 from .data import embed_sequences
 from .gp_classification import SequenceGPClassifier
-from .mlp_classification import SequenceMLPEnsembleClassifier
 
 try:
     from fitness_landscape.core.fitness import ProbabilisticCategoricalFitness
@@ -14,20 +25,6 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     FitnessLandscape = Any  # type: ignore
     ProbabilisticCategoricalFitness = Any  # type: ignore
-
-
-def _resolve_embedding_info(landscape: Any) -> Tuple[Optional[str], Optional[str], Optional[Mapping[str, Any]]]:
-    domain = getattr(landscape, "active_embedding_domain", getattr(landscape, "_active_embedding_domain", None))
-    meta = None
-    if hasattr(landscape, "get_embedding_metadata"):
-        try:
-            meta = landscape.get_embedding_metadata(domain)
-        except Exception:
-            meta = None
-    model_name = getattr(landscape, "embedding_model", None)
-    if meta is not None and meta.get("model_name"):
-        model_name = meta.get("model_name")
-    return domain, model_name, meta
 
 
 def predict_sequences(
@@ -113,71 +110,6 @@ def predict_landscape_records(
     return mean_probs.cpu(), variance.cpu()
 
 
-_MODEL_TO_LAYER: dict[Type[Any], str] = {
-    SequenceGPClassifier: "prob_categorical",
-    SequenceMLPEnsembleClassifier: "prob_categorical",
-}
-
-LayerAdapter = Callable[
-    [Mapping[str, torch.Tensor], Optional[Sequence[str]], Mapping[str, Any], str],
-    Any,
-]
-
-
-def _prob_categorical_adapter(
-    outputs: Mapping[str, torch.Tensor],
-    categories: Optional[Sequence[str]],
-    metadata: Mapping[str, Any],
-    layer_name: str,
-) -> Any:
-    if "mean" not in outputs:
-        raise ValueError(
-            "Probabilistic categorical adapter requires 'mean' prediction."
-        )
-    mean = outputs["mean"]
-    var = outputs.get("var")
-    num_classes = mean.shape[-1]
-    cats = (
-        list(categories)
-        if categories is not None
-        else [f"class_{i}" for i in range(num_classes)]
-    )
-    if len(cats) != num_classes:
-        raise ValueError("Number of categories does not match model output dimension.")
-    meta = dict(metadata)
-    if var is not None:
-        meta["variance"] = var.numpy()
-    return ProbabilisticCategoricalFitness(
-        name=layer_name,
-        probabilities=mean.numpy(),
-        categories=cats,
-        metadata=meta,
-    )
-
-
-_LAYER_ADAPTERS: dict[str, LayerAdapter] = {
-    "prob_categorical": _prob_categorical_adapter,
-}
-
-
-def register_model_layer_mapping(
-    model_cls: Type[Any], layer_kind: str, *, overwrite: bool = False
-) -> None:
-    if model_cls in _MODEL_TO_LAYER and not overwrite:
-        raise ValueError(
-            f"Model {model_cls.__name__} already mapped to {_MODEL_TO_LAYER[model_cls]!r}."
-        )
-    _MODEL_TO_LAYER[model_cls] = layer_kind
-
-
-def register_layer_adapter(
-    kind: str, adapter: LayerAdapter, *, overwrite: bool = False
-) -> None:
-    if kind in _LAYER_ADAPTERS and not overwrite:
-        raise ValueError(f"Adapter for layer kind {kind!r} already exists.")
-    _LAYER_ADAPTERS[kind] = adapter
-
-
 def infer_fitness_layer_from_landscape(
     landscape: FitnessLandscape,
     model: Any,
@@ -189,6 +121,8 @@ def infer_fitness_layer_from_landscape(
     inplace: bool = True,
     layer_name: str = "predicted_fitness",
     categories: Optional[Sequence[str]] = None,
+    input_adapter: LandscapeInputAdapter | str | None = None,
+    input_adapter_kwargs: Optional[Mapping[str, Any]] = None,
 ) -> ProbabilisticCategoricalFitness:
     """
     Run inference on a ``FitnessLandscape`` and construct a predicted fitness layer.
@@ -198,7 +132,7 @@ def infer_fitness_layer_from_landscape(
     landscape : FitnessLandscape
         Landscape object providing embeddings.
     model : Any
-        Trained model registered in ``_MODEL_TO_LAYER``.
+        Trained model or ``ModelAdapter`` compatible with the registry.
     batch_size : int, default=256
         Batch size for inference DataLoader.
     num_workers : int, default=0
@@ -213,6 +147,10 @@ def infer_fitness_layer_from_landscape(
         Name assigned to the created layer.
     categories : Sequence[str], optional
         Optional category names; defaults to inferred class indices.
+    input_adapter : LandscapeInputAdapter | str, optional
+        Adapter used to extract model inputs from the landscape.
+    input_adapter_kwargs : Mapping[str, Any], optional
+        Optional kwargs used to construct the input adapter when a name is provided.
 
     Returns
     -------
@@ -224,21 +162,18 @@ def infer_fitness_layer_from_landscape(
     ValueError
         If the model type is unsupported or embedding compatibility checks fail.
     RuntimeError
-        If embeddings are unavailable and cannot be computed.
+        If the input adapter cannot supply model inputs.
     """
-    model_type = type(model)
-    layer_kind = _MODEL_TO_LAYER.get(model_type)
-    if layer_kind is None:
-        raise ValueError(
-            f"Model type {model_type.__name__} is not supported for inference."
-        )
-    adapter = _LAYER_ADAPTERS.get(layer_kind)
-    if adapter is None:
-        raise ValueError(f"No adapter registered for layer kind '{layer_kind}'.")
+    model_adapter = resolve_model_adapter(model)
+    layer_kind = model_adapter.layer_kind
+    layer_adapter = resolve_output_adapter(layer_kind)
+    input_adapter_obj = resolve_input_adapter(
+        input_adapter, **(input_adapter_kwargs or {})
+    )
 
-    expected_domain = getattr(model, "embedding_domain", None)
-    expected_model = getattr(model, "embedding_model", None)
-    active_domain, active_model, active_meta = _resolve_embedding_info(landscape)
+    expected_domain = getattr(model_adapter, "embedding_domain", None)
+    expected_model = getattr(model_adapter, "embedding_model", None)
+    active_domain, active_model, _ = input_adapter_obj.embedding_info(landscape)
     if expected_domain and active_domain and expected_domain != active_domain:
         raise ValueError(
             f"Embedding domain mismatch: model expects {expected_domain}, landscape active is {active_domain}."
@@ -248,62 +183,69 @@ def infer_fitness_layer_from_landscape(
             f"Embedding model mismatch: model expects {expected_model}, landscape has {active_model}."
         )
 
-    emb_array = landscape.get_embedding()
-    if emb_array is None:
-        fallback_model = None
-        if isinstance(active_meta, Mapping):
-            fallback_model = active_meta.get("model_name")
-        model_name = expected_model or fallback_model or "facebook/esm2_t6_8M_UR50D"
-        landscape.compute_plm_embeddings(model_name=model_name)
-        emb_array = landscape.get_embedding()
-        active_domain, active_model, active_meta = _resolve_embedding_info(landscape)
-    if emb_array is None:
-        raise RuntimeError(
-            "No embeddings available on landscape and automatic computation failed."
-        )
-
-    emb = torch.as_tensor(emb_array, dtype=torch.float32)
-    ds = torch.utils.data.TensorDataset(emb, torch.zeros(len(emb), dtype=torch.long))
-    dl = torch.utils.data.DataLoader(ds, batch_size=batch_size, num_workers=num_workers)
-
-    outputs: dict[str, torch.Tensor] = {}
-    model.eval()
-    model_device = device or next(model.parameters()).device
-    if layer_kind == "prob_categorical":
-        if not hasattr(model, "predict_with_uncertainty"):
-            raise ValueError(
-                f"Model {model_type.__name__} must implement predict_with_uncertainty."
+    outputs_by_key: dict[str, list[torch.Tensor]] = {}
+    if hasattr(model_adapter, "eval"):
+        model_adapter.eval()
+    model_device = (
+        torch.device(device)
+        if device is not None
+        else infer_device(model_adapter)
+        or infer_device(getattr(model_adapter, "model", None))
+        or infer_device(model)
+        or torch.device("cpu")
+    )
+    if device is not None and hasattr(model_adapter, "to"):
+        model_adapter.to(model_device)
+    with torch.no_grad():
+        for batch in input_adapter_obj.iter_batches(
+            landscape,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            device=model_device,
+            model_name=expected_model,
+        ):
+            inputs = input_adapter_obj.to_model_inputs(batch, device=model_device)
+            batch_outputs = normalize_adapter_outputs(
+                model_adapter.predict(inputs), layer_kind
             )
-        all_mean: list[torch.Tensor] = []
-        all_var: list[torch.Tensor] = []
-        with torch.no_grad():
-            for xb, _ in dl:
-                xb = xb.to(model_device)
-                mean_probs, var_probs = model.predict_with_uncertainty(xb)
-                all_mean.append(mean_probs.cpu())
-                all_var.append(var_probs.cpu())
-        outputs["mean"] = torch.cat(all_mean, dim=0)
-        outputs["var"] = torch.cat(all_var, dim=0)
-    else:
-        # Generic forward pass
-        all_out: list[torch.Tensor] = []
-        with torch.no_grad():
-            for xb, _ in dl:
-                xb = xb.to(model_device)
-                out = model(xb)
-                all_out.append(out.cpu())
-        outputs["output"] = torch.cat(all_out, dim=0)
+            for key, tensor in batch_outputs.items():
+                if tensor is None:
+                    continue
+                if not torch.is_tensor(tensor):
+                    raise ValueError(
+                        f"Adapter output '{key}' must be a torch.Tensor."
+                    )
+                outputs_by_key.setdefault(key, []).append(tensor.detach().cpu())
 
+    outputs = {
+        key: torch.cat(tensors, dim=0) for key, tensors in outputs_by_key.items()
+    }
+
+    model_meta = getattr(model_adapter, "model", None) or model
+    model_type = type(model_meta)
+
+    final_domain, final_model, final_meta = input_adapter_obj.embedding_info(
+        landscape
+    )
     meta = {
         "predicted": True,
         "model_type": model_type.__name__,
         "layer_kind": layer_kind,
-        "embedding_domain": active_domain or expected_domain,
-        "embedding_model": active_model or expected_model,
     }
-    if isinstance(active_meta, Mapping) and "embedding_mode" in active_meta:
-        meta["embedding_mode"] = active_meta["embedding_mode"]
-    layer = adapter(outputs, categories, meta, layer_name)
+    meta.update(input_adapter_obj.metadata(landscape))
+    if model_adapter is not model:
+        meta["adapter_type"] = type(model_adapter).__name__
+    if "embedding_domain" not in meta and (final_domain or expected_domain):
+        meta["embedding_domain"] = final_domain or expected_domain
+    if "embedding_model" not in meta and (final_model or expected_model):
+        meta["embedding_model"] = final_model or expected_model
+    if (
+        "embedding_mode" not in meta
+        and isinstance(final_meta, Mapping)
+        and "embedding_mode" in final_meta
+    ):
+        meta["embedding_mode"] = final_meta["embedding_mode"]
+    layer = layer_adapter.to_layer(outputs, categories, meta, layer_name)
 
     if attach and hasattr(landscape, "attach"):
         target = landscape if inplace else landscape.copy()

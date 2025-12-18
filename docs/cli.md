@@ -20,6 +20,12 @@ The CLI is exposed via `python -m landscapyml` (see `landscapyml.__main__`). It 
   ```bash
   python -m landscapyml train --config-path /path/to/conf model=sequence_mlp_classifier
   ```
+- Train with an external LightningModule by class path:
+  ```bash
+  python -m landscapyml train model=external \
+    model_kwargs.class_path=mypkg.models.MyLightningModule \
+    model_kwargs.init_kwargs.num_classes=3
+  ```
 - Generate a config from a CSV containing sequences and labels:
   ```bash
   python -m landscapyml config-from-csv \
