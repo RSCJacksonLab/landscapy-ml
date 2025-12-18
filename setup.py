@@ -35,7 +35,6 @@ setup(
         "click>=8.1",
         "hydra-core>=1.3",
         "torch>=2.2",
-        "gpytorch>=1.11",
         "pytorch-lightning>=2.3",
         "numpy>=1.24",
         "scipy>=1.10",

@@ -4,7 +4,7 @@ Hydra drives training and testing. The structured config schema is defined in `c
 
 ## Default config
 The baseline config ships inside the package at `landscapyml/conf/config.yaml` (also available at the repo root `conf/config.yaml`). Key fields:
-- `model`: Registry key for the model factory (see `trainer.py`). Default `sequence_gp_classifier`.
+- `model`: Registry key for the model factory (see `trainer.py`). Default `sequence_mlp_classifier`.
 - `data`: Registry key for the data builder. Default `raw_sequences` (embeds raw sequences before training).
 - `model_kwargs`: Passed to the selected model factory (e.g., `num_classes`, `num_inducing`).
 - `data_kwargs`: Passed to the data builder (e.g., sequence lists, labels, label mapping, embedding options).

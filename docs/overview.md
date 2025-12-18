@@ -1,13 +1,13 @@
 # landscapy-ml Overview
 
-landscapy-ml provides sequence classification utilities built on landscapy, PyTorch Lightning, and GPyTorch. The package centers around small, composable helpers for embedding sequences, constructing datasets, training classifiers, and running inference with uncertainty estimates.
+landscapy-ml provides sequence classification utilities built on landscapy and PyTorch Lightning. The package centers around small, composable helpers for embedding sequences, constructing datasets, training classifiers, and running inference with uncertainty estimates.
 
 ## Package layout
 - `landscapyml.config.JobConfig`: Hydra-validated configuration schema for training jobs.
 - `landscapyml.data`: Embedding helpers, dataset and Lightning `DataModule` definitions.
 - `landscapyml.data_utils`: Convenience builders for creating configs from data frames or CSVs.
-- `landscapyml.gp_classification`: Variational Gaussian process classifier and Trainer factory.
 - `landscapyml.mlp_classification`: MLP classifiers (single model and deep ensemble) for embeddings.
+- `landscapyml.trainer`: Trainer factory (`create_trainer`) and registries for models/data builders.
 - `landscapyml.trainer`: Registries for models/data builders plus the `TrainingJob` wrapper.
 - `landscapyml.hydra_runner`: Programmatic Hydra entry point that wires configs to `TrainingJob`.
 - `landscapyml.inference`: Inference helpers for raw sequences, FitnessLandscape exports, and landscape layers.

@@ -17,7 +17,6 @@ from .adapters import (
     resolve_output_adapter,
 )
 from .data import embed_sequences
-from .gp_classification import SequenceGPClassifier
 
 try:
     from fitness_landscape.core.fitness import ProbabilisticCategoricalFitness
@@ -28,7 +27,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 def predict_sequences(
-    model: SequenceGPClassifier,
+    model: Any,
     sequences: Sequence[Any],
     *,
     embedding_mode: str = "hard",
@@ -41,7 +40,7 @@ def predict_sequences(
 
     Parameters
     ----------
-    model : SequenceGPClassifier
+    model : Any
         Trained classifier implementing ``predict_with_uncertainty``.
     sequences : Sequence[Any]
         Raw sequences to embed and classify.
@@ -74,7 +73,7 @@ def predict_sequences(
 
 
 def predict_landscape_records(
-    model: SequenceGPClassifier,
+    model: Any,
     records: Iterable[Mapping[str, Any]],
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
@@ -82,7 +81,7 @@ def predict_landscape_records(
 
     Parameters
     ----------
-    model : SequenceGPClassifier
+    model : Any
         Trained classifier implementing ``predict_with_uncertainty``.
     records : Iterable[Mapping[str, Any]]
         Iterable of record dictionaries containing ``embedding`` or ``sequence_tensor``.

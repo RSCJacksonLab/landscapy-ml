@@ -34,7 +34,7 @@ The CLI is exposed via `python -m landscapyml` (see `landscapyml.__main__`). It 
     --label-column family \
     --out-dir landscapyml_run_conf \
     --embedding-mode hard \
-    --model-key sequence_gp_classifier
+    --model-key sequence_mlp_classifier
   ```
 
 ## Runtime behavior

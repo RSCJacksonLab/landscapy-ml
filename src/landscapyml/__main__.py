@@ -137,9 +137,9 @@ def train(ctx: click.Context, config_path: Path | None) -> None:
 @click.option("--val-seed", default=None, type=int, help="Optional seed for val split.")
 @click.option(
     "--model-key",
-    default="sequence_gp_classifier",
+    default="sequence_mlp_classifier",
     show_default=True,
-    help="Registered model key to use (e.g., sequence_gp_classifier, sequence_mlp_classifier).",
+    help="Registered model key to use (e.g., sequence_mlp_classifier, sequence_mlp_ensemble).",
 )
 def config_from_csv(
     csv_path: Path,

@@ -12,9 +12,9 @@ def test_run_job_executes_without_training(tmp_path):
         {"sequence_tensor": torch.tensor([0.0, 1.0]), "fitness_tensors": {"label": 1}},
     ]
     cfg = JobConfig(
-        model="sequence_gp_classifier",
+        model="sequence_mlp_classifier",
         data="fitness_landscape_records",
-        model_kwargs={"num_classes": 2, "num_inducing": 2, "num_data": 2},
+        model_kwargs={"num_classes": 2},
         data_kwargs={
             "train_data": records,
             "label_key": "label",

@@ -47,7 +47,7 @@ class CSVConfigRequest:
         Fraction of training data held out for validation when validation data is not provided.
     val_seed : int, optional
         Seed controlling the validation split.
-    model_key : str, default="sequence_gp_classifier"
+    model_key : str, default="sequence_mlp_classifier"
         Registry key for the model factory to use.
     """
 
@@ -63,7 +63,7 @@ class CSVConfigRequest:
     seed: Optional[int] = None
     val_split: float = 0.0
     val_seed: Optional[int] = None
-    model_key: str = "sequence_gp_classifier"
+    model_key: str = "sequence_mlp_classifier"
     # TODO: Support landscapy FitnessLandscape inputs directly.
 
 
@@ -73,7 +73,7 @@ def build_config_from_dataframe(
     *,
     sequence_column: str,
     label_column: str,
-    model: str = "sequence_gp_classifier",
+    model: str = "sequence_mlp_classifier",
     data: str = "raw_sequences",
     embedding_mode: str = "hard",
     model_name: str = "facebook/esm2_t6_8M_UR50D",
@@ -98,7 +98,7 @@ def build_config_from_dataframe(
         Column name containing raw sequences.
     label_column : str
         Column name containing labels.
-    model : str, default="sequence_gp_classifier"
+    model : str, default="sequence_mlp_classifier"
         Registry key for the model factory.
     data : str, default="raw_sequences"
         Registry key for the data builder.

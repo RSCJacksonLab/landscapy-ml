@@ -1,7 +1,7 @@
 # landscapy-ml
 
 Sequence classification utilities for carbonic anhydrase families built on top of
-`landscapy`, GPyTorch, and PyTorch Lightning.
+`landscapy` and PyTorch Lightning.
 
 ## Installation
 
@@ -21,7 +21,7 @@ pre-commit install
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from landscapyml import (
-    SequenceGPClassifier,
+    SequenceMLPEnsembleClassifier,
     SequenceClassificationDataModule,
     create_trainer,
     TrainingJob,
@@ -34,7 +34,7 @@ labels = torch.randint(0, 4, (16,))
 dataset = TensorDataset(embeddings, labels)
 loader = DataLoader(dataset, batch_size=8, shuffle=True)
 
-model = SequenceGPClassifier(num_features=128, num_classes=4, num_inducing=32)
+model = SequenceMLPEnsembleClassifier(num_features=128, num_classes=4, num_models=3)
 trainer = create_trainer(max_epochs=5)
 
 trainer.fit(model, train_dataloaders=loader)
@@ -63,12 +63,12 @@ probs, uncertainty = model.predict_with_uncertainty(embeddings)
 #     model_name="facebook/esm2_t6_8M_UR50D",
 # )
 # dm = SequenceClassificationDataModule(train_data=records, label_key="label", batch_size=4)
-# model = SequenceGPClassifier(num_features=records[0]["embedding"].shape[-1], num_classes=2)
+# model = SequenceMLPEnsembleClassifier(num_features=records[0]["embedding"].shape[-1], num_classes=2)
 # trainer.fit(model, datamodule=dm)
 
 # End-to-end training job wrapper (for upcoming CLI)
 # job = TrainingJob(
-#     model_name="sequence_gp_classifier",
+#     model_name="sequence_mlp_ensemble",
 #     data_name="raw_sequences",
 #     model_kwargs={"num_classes": 2},
 #     data_kwargs={
@@ -100,12 +100,11 @@ probs, uncertainty = model.predict_with_uncertainty(embeddings)
 #   trainer_kwargs.wandb_project=my_project trainer_kwargs.wandb_run_name=test_run
 #
 # Override config directory (if you keep custom configs elsewhere)
-# python -m landscapyml train --config-path /path/to/conf model=sequence_gp_classifier
+# python -m landscapyml train --config-path /path/to/conf model=sequence_mlp_classifier
 #
 # Hydra multirun (sweep over num_classes)
 # python -m landscapyml train -m model_kwargs.num_classes=2,4 trainer_kwargs.max_epochs=5
 ```
 
-`SequenceGPClassifier` wraps a variational GPyTorch model with a softmax
-likelihood, enabling classification with predictive uncertainty estimates on
-unseen amino-acid sequence embeddings.
+`SequenceMLPEnsembleClassifier` aggregates multiple MLPs to provide predictive
+uncertainty estimates on unseen amino-acid sequence embeddings.

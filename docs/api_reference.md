@@ -8,9 +8,8 @@ This is a lightweight catalog of the public symbols exported from `landscapyml._
 - `CSVConfigRequest`, `build_config_from_dataframe`, `build_config_from_csv`, `write_config` (`data_utils.py`): Build Hydra-ready configs from tabular data or CSVs.
 
 ## Models and trainers
-- `SequenceGPModel`, `SequenceGPClassifier`, `create_trainer` (`gp_classification.py`).
 - `SequenceMLPClassifier`, `SequenceMLPEnsembleClassifier` (`mlp_classification.py`).
-- `TrainingJob`, `register_model`, `register_data` (`trainer.py`).
+- `TrainingJob`, `register_model`, `register_data`, `create_trainer` (`trainer.py`).
 
 ## Inference helpers
 - `predict_sequences`, `predict_landscape_records` (`inference.py`).
@@ -25,5 +24,5 @@ This is a lightweight catalog of the public symbols exported from `landscapyml._
 
 Imports use the package namespace:
 ```python
-from landscapyml import SequenceGPClassifier, TrainingJob, embed_sequences
+from landscapyml import SequenceMLPClassifier, TrainingJob, embed_sequences
 ```

@@ -6,11 +6,13 @@ from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 import importlib
 import json
 from pathlib import Path
+import warnings
+
 import pytorch_lightning as pl
 import torch
+from pytorch_lightning.loggers import TensorBoardLogger
 
-from .data import SequenceClassificationDataModule, embed_sequences_to_records
-from .gp_classification import SequenceGPClassifier, create_trainer
+from .data import SequenceClassificationDataModule
 from .mlp_classification import SequenceMLPClassifier, SequenceMLPEnsembleClassifier
 
 ModelFactory = Callable[..., pl.LightningModule]
@@ -49,7 +51,6 @@ def register_data(name: str, factory: DataFactory, *, overwrite: bool = False) -
 
 
 # Default registry entries
-register_model("sequence_gp_classifier", SequenceGPClassifier, overwrite=True)
 register_model("sequence_mlp_classifier", SequenceMLPClassifier, overwrite=True)
 register_model("sequence_mlp_ensemble", SequenceMLPEnsembleClassifier, overwrite=True)
 # External class-path model loader (expects a LightningModule or adapter).
@@ -121,6 +122,128 @@ register_data(
     overwrite=True,
 )
 # TODO: Register landscapy-native builders when available.
+
+
+def create_trainer(
+    *,
+    max_epochs: int = 50,
+    accelerator: Optional[str] = "auto",
+    devices: Optional[int] = 1,
+    log_every_n_steps: int = 10,
+    log_dir: str = "logs",
+    experiment_name: str = "landscapyml",
+    checkpoint_dir: str = "checkpoints",
+    checkpoint_monitor: Optional[str] = "val/loss",
+    checkpoint_mode: str = "min",
+    checkpoint_every_n_epochs: int = 1,
+    save_top_k: int = 1,
+    use_wandb: bool = True,
+    wandb_project: Optional[str] = None,
+    wandb_entity: Optional[str] = None,
+    wandb_run_name: Optional[str] = None,
+    wandb_tags: Optional[list[str]] = None,
+    wandb_dir: Optional[str] = None,
+    num_sanity_val_steps: int = 0,
+) -> pl.Trainer:
+    """
+    Build a PyTorch Lightning ``Trainer`` with TensorBoard (and optional W&B) logging.
+
+    Parameters
+    ----------
+    max_epochs : int, default=50
+        Maximum number of training epochs.
+    accelerator : str or None, default="auto"
+        Accelerator passed to Lightning (e.g., ``"cpu"``, ``"gpu"``, or ``"auto"``).
+    devices : int or None, default=1
+        Number of devices to use; forwarded to Lightning.
+    log_every_n_steps : int, default=10
+        Logging frequency in steps.
+    log_dir : str, default="logs"
+        Base directory for TensorBoard logs.
+    experiment_name : str, default="landscapyml"
+        Experiment subdirectory name used by loggers.
+    checkpoint_dir : str, default="checkpoints"
+        Directory for model checkpoints.
+    checkpoint_monitor : str or None, default="val/loss"
+        Metric name to monitor for checkpointing. ``None`` disables checkpointing.
+    checkpoint_mode : str, default="min"
+        Whether to minimize or maximize the monitored metric.
+    checkpoint_every_n_epochs : int, default=1
+        Frequency in epochs for checkpointing.
+    save_top_k : int, default=1
+        Number of best checkpoints to keep.
+    use_wandb : bool, default=True
+        Whether to enable Weights & Biases logging (if available).
+    wandb_project : str, optional
+        Optional W&B project name.
+    wandb_entity : str, optional
+        Optional W&B entity/organization.
+    wandb_run_name : str, optional
+        Optional W&B run name.
+    wandb_tags : list[str], optional
+        Optional W&B tags.
+    wandb_dir : str, optional
+        Optional W&B log directory.
+    num_sanity_val_steps : int, default=0
+        Number of validation sanity steps to run before training.
+
+    Returns
+    -------
+    pytorch_lightning.Trainer
+        Configured Lightning trainer instance.
+    """
+    tensorboard_logger = TensorBoardLogger(
+        save_dir=log_dir,
+        name=experiment_name,
+        default_hp_metric=False,
+    )
+    loggers = [tensorboard_logger]
+
+    if use_wandb:
+        try:
+            from pytorch_lightning.loggers import WandbLogger
+        except Exception as exc:  # pragma: no cover - optional dependency
+            warnings.warn(
+                f"W&B logging requested but wandb is not available: {exc}. "
+                "Proceeding with TensorBoard only.",
+                RuntimeWarning,
+            )
+        else:
+            if wandb_project is None:
+                warnings.warn(
+                    "wandb_project is None; WandbLogger will use the default W&B project.",
+                    RuntimeWarning,
+                )
+            wandb_logger = WandbLogger(
+                project=wandb_project,
+                entity=wandb_entity,
+                name=wandb_run_name,
+                tags=wandb_tags,
+                save_dir=wandb_dir,
+            )
+            loggers.append(wandb_logger)
+
+    callbacks = []
+    if checkpoint_monitor is not None:
+        callbacks.append(
+            pl.callbacks.ModelCheckpoint(
+                dirpath=checkpoint_dir,
+                monitor=checkpoint_monitor,
+                mode=checkpoint_mode,
+                every_n_epochs=checkpoint_every_n_epochs,
+                save_top_k=save_top_k,
+            )
+        )
+
+    return pl.Trainer(
+        max_epochs=max_epochs,
+        accelerator=accelerator,
+        devices=devices,
+        log_every_n_steps=log_every_n_steps,
+        logger=loggers,
+        callbacks=callbacks,
+        num_sanity_val_steps=num_sanity_val_steps,
+    )
 
 
 @dataclass

@@ -87,12 +87,12 @@ def test_build_config_from_dataframe_creates_expected_fields():
         sequence_column="sequence",
         label_column="family",
         max_epochs=3,
-        model="sequence_gp_classifier",
+        model="sequence_mlp_classifier",
         embedding_mode="hard",
         val_split=0.25,
         wandb_project="proj",
     )
-    assert cfg["model"] == "sequence_gp_classifier"
+    assert cfg["model"] == "sequence_mlp_classifier"
     assert cfg["data_kwargs"]["label_key"] == "family"
     assert cfg["data_kwargs"]["label_mapping"] == ["x", "y"]
     assert cfg["trainer_kwargs"]["max_epochs"] == 3

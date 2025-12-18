@@ -6,20 +6,20 @@ This guide stitches together the main APIs exposed in `landscapyml.__init__` for
 ```python
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from landscapyml import SequenceGPClassifier, create_trainer
+from landscapyml import SequenceMLPClassifier, create_trainer
 
 embeddings = torch.randn(32, 128)
 labels = torch.randint(0, 3, (32,))
 loader = DataLoader(TensorDataset(embeddings, labels), batch_size=8, shuffle=True)
 
-model = SequenceGPClassifier(num_features=128, num_classes=3, num_inducing=32)
+model = SequenceMLPClassifier(num_features=128, num_classes=3)
 trainer = create_trainer(max_epochs=5)
 trainer.fit(model, train_dataloaders=loader)
 ```
 
 ## Train from raw sequences (auto-embed)
 ```python
-from landscapyml import SequenceClassificationDataModule, SequenceGPClassifier, create_trainer
+from landscapyml import SequenceClassificationDataModule, SequenceMLPClassifier, create_trainer
 
 sequences = ["ACDE", "MNPK", "WXYZ"]
 labels = [0, 1, 2]
@@ -35,7 +35,7 @@ dm = SequenceClassificationDataModule.from_sequences(
 
 dm.setup("fit")
 num_features = dm.train_dataloader().dataset[0][0].shape[-1]  # inferred automatically by TrainingJob
-model = SequenceGPClassifier(num_features=num_features, num_classes=3)
+model = SequenceMLPClassifier(num_features=num_features, num_classes=3)
 trainer = create_trainer(max_epochs=5)
 trainer.fit(model, datamodule=dm)
 ```
@@ -85,7 +85,7 @@ config = build_config_from_dataframe(
     df,
     sequence_column="sequence",
     label_column="family",
-    model="sequence_gp_classifier",
+    model="sequence_mlp_classifier",
     embedding_mode="hard",
     max_epochs=10,
 )
@@ -93,9 +93,11 @@ write_config(config, Path("landscapyml_run_conf/config.yaml"))
 ```
 
 ## Inference with uncertainty
-After training, reuse the same model for predictions.
+After training, reuse an ensemble model for predictions with uncertainty.
 ```python
-from landscapyml import predict_sequences
+from landscapyml import SequenceMLPEnsembleClassifier, predict_sequences
+
+model = SequenceMLPEnsembleClassifier(num_features=128, num_classes=3, num_models=3)
 
 probs, var = predict_sequences(
     model,

@@ -14,9 +14,9 @@ def test_training_job_builds_components(tmp_path):
     ckpt_dir = tmp_path / "ckpts"
     log_dir = tmp_path / "logs"
     job = TrainingJob(
-        model_name="sequence_gp_classifier",
+        model_name="sequence_mlp_classifier",
         data_name="fitness_landscape_records",
-        model_kwargs={"num_classes": 2, "num_inducing": 2, "num_data": 2},
+        model_kwargs={"num_classes": 2},
         data_kwargs={
             "train_data": records,
             "label_key": "label",

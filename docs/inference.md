@@ -5,7 +5,7 @@ Inference helpers live in `landscapyml.inference` and operate on trained models 
 ## Direct sequence predictions
 - `predict_sequences(model, sequences, *, embedding_mode="hard", model_name="facebook/esm2_t6_8M_UR50D", device=None, embedding_batch_size=32) -> (mean_probs, variance)`
   - Embeds raw sequences via `embed_sequences` (no tokens returned) and runs `model.predict_with_uncertainty`.
-  - The model must implement `predict_with_uncertainty` (available on `SequenceGPClassifier` and `SequenceMLPEnsembleClassifier`).
+  - The model must implement `predict_with_uncertainty` (available on `SequenceMLPEnsembleClassifier`).
 
 ## FitnessLandscape record predictions
 - `predict_landscape_records(model, records) -> (mean_probs, variance)`

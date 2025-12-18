@@ -1,16 +1,13 @@
 # Models, trainers, and jobs
 
 ## Model implementations
-- `SequenceGPClassifier` (`gp_classification.py`): Variational Gaussian process classifier with a softmax likelihood (`gpytorch.likelihoods.SoftmaxLikelihood`).
-  - Key args: `num_features`, `num_classes`, `inducing_points` or `num_inducing`, `learning_rate`, `weight_decay`, `num_data` (optional dataset size for ELBO), `embedding_domain`, `embedding_model` (stored for compatibility checks during inference).
-  - Training/validation steps log loss and accuracies (overall and per-class). `predict_with_uncertainty` returns `(mean_probs, variance)` over classes.
 - `SequenceMLPClassifier` (`mlp_classification.py`): Single MLP classifier for embeddings.
   - Key args: `num_features`, `num_classes`, `hidden_sizes`, `dropout`, optimizer hyperparameters.
 - `SequenceMLPEnsembleClassifier` (`mlp_classification.py`): Deep ensemble of MLP classifiers for uncertainty estimation.
   - Key args: same as single MLP plus `num_models`; `predict_with_uncertainty` aggregates mean/variance across ensemble members.
 
 ## Trainer factory
-- `create_trainer(...)` in `gp_classification.py` builds a `pytorch_lightning.Trainer` with:
+- `create_trainer(...)` in `trainer.py` builds a `pytorch_lightning.Trainer` with:
   - TensorBoard logging to `log_dir/experiment_name`.
   - Optional W&B logging (when `use_wandb` true and `wandb` available) configured via `wandb_project`, `wandb_entity`, `wandb_run_name`, `wandb_tags`, `wandb_dir`.
   - Checkpointing callback controlled by `checkpoint_dir`, `checkpoint_monitor`, `checkpoint_mode`, `checkpoint_every_n_epochs`, `save_top_k`.
@@ -18,7 +15,7 @@
 
 ## Registries
 `trainer.py` maintains registries that map string keys to factories:
-- Models: `sequence_gp_classifier`, `sequence_mlp_classifier`, `sequence_mlp_ensemble`, `external`.
+- Models: `sequence_mlp_classifier`, `sequence_mlp_ensemble`, `external`.
 - Data builders: `fitness_landscape_records`, `raw_sequences` (`SequenceClassificationDataModule.from_sequences`), `fitness_landscape` (alias for direct record usage).
 Use `register_model(name, factory, overwrite=False, requires_num_features=True)` or `register_data(name, factory, overwrite=False)` to extend the set of available components. Set `requires_num_features=False` for models that should not auto-infer feature dimensions. Factories must accept the kwargs passed via Hydra or `TrainingJob`. Example:
 ```python
@@ -80,7 +77,7 @@ Typical programmatic training flow:
 from landscapyml import TrainingJob
 
 job = TrainingJob(
-    model_name="sequence_gp_classifier",
+    model_name="sequence_mlp_classifier",
     data_name="raw_sequences",
     model_kwargs={"num_classes": 3},
     data_kwargs={
