@@ -11,6 +11,29 @@ from .trainer import _DATA_REGISTRY, _MODEL_REGISTRY  # type: ignore
 from .data_utils import build_config_from_csv, write_config, CSVConfigRequest
 
 
+def _extract_config_path_from_overrides(
+    args: list[str],
+) -> tuple[list[str], Path | None]:
+    """
+    If the first positional argument is a path to a config (file or dir),
+    return it and strip from overrides. Otherwise return args unchanged.
+    """
+    if not args:
+        return args, None
+    first = args[0]
+    # Likely an override, not a path.
+    if first.startswith("--") or "=" in first or first.startswith("+"):
+        return args, None
+    candidate = Path(first)
+    if candidate.is_file() and candidate.name == "config.yaml":
+        return args[1:], candidate
+    if candidate.is_dir():
+        cfg = candidate / "config.yaml"
+        if cfg.is_file():
+            return args[1:], cfg
+    return args, None
+
+
 @click.group(help="landscapy-ml CLI (training utilities).")
 def cli() -> None:
     pass
@@ -41,8 +64,12 @@ def list_registered() -> None:
 def train(ctx: click.Context, config_path: Path | None) -> None:
     # Forward any remaining args directly to Hydra as overrides.
     overrides = list(ctx.args)
-    if config_path:
-        cfg_path = config_path.resolve()
+    extracted_cfg: Path | None = None
+    if config_path is None:
+        overrides, extracted_cfg = _extract_config_path_from_overrides(overrides)
+    cfg_path = config_path or extracted_cfg
+    if cfg_path:
+        cfg_path = cfg_path.resolve()
         if cfg_path.is_file():
             if cfg_path.name != "config.yaml":
                 raise click.ClickException(
