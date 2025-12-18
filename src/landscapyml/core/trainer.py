@@ -12,8 +12,8 @@ import pytorch_lightning as pl
 import torch
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from .data import SequenceClassificationDataModule
-from .mlp_classification import SequenceMLPClassifier, SequenceMLPEnsembleClassifier
+from ..data import SequenceClassificationDataModule
+from ..mlp_classification import SequenceMLPClassifier, SequenceMLPEnsembleClassifier
 
 ModelFactory = Callable[..., pl.LightningModule]
 DataFactory = Callable[..., pl.LightningDataModule]

@@ -7,7 +7,7 @@ from typing import List
 import click
 
 from .hydra_runner import ENV_CONFIG_PATH, run_with_hydra
-from .trainer import _DATA_REGISTRY, _MODEL_REGISTRY  # type: ignore
+from .core.trainer import _DATA_REGISTRY, _MODEL_REGISTRY  # type: ignore
 from .data_utils import build_config_from_csv, write_config, CSVConfigRequest
 
 

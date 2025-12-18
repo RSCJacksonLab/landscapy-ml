@@ -17,8 +17,6 @@ from typing import (
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from .mlp_classification import SequenceMLPEnsembleClassifier
-
 try:
     from fitness_landscape.core.fitness import ProbabilisticCategoricalFitness
 except Exception:  # pragma: no cover - optional dependency
@@ -94,36 +92,10 @@ class DefaultModelAdapter:
         return {"output": out}
 
 
-class MLPEnsembleCategoricalAdapter(ModelAdapter):
-    layer_kind = "prob_categorical"
-
-    def __init__(self, model: SequenceMLPEnsembleClassifier) -> None:
-        self.model = model
-        self.embedding_domain = getattr(model, "embedding_domain", None)
-        self.embedding_model = getattr(model, "embedding_model", None)
-
-    def eval(self) -> None:
-        self.model.eval()
-
-    def to(self, device: torch.device | str) -> "MLPEnsembleCategoricalAdapter":
-        self.model.to(device)
-        return self
-
-    def predict(self, inputs: Any) -> Mapping[str, torch.Tensor]:
-        if not hasattr(self.model, "predict_with_uncertainty"):
-            raise ValueError(
-                "MLP ensemble adapter requires predict_with_uncertainty to be implemented."
-            )
-        mean, var = self.model.predict_with_uncertainty(inputs)
-        return {"mean": mean, "var": var}
-
-
 ModelAdapterFactory = Callable[[Any], ModelAdapter]
 _MODEL_ADAPTERS: dict[Type[Any], ModelAdapterFactory] = {}
 
-_MODEL_TO_LAYER: dict[Type[Any], str] = {
-    SequenceMLPEnsembleClassifier: "prob_categorical",
-}
+_MODEL_TO_LAYER: dict[Type[Any], str] = {}
 
 
 def register_model_adapter(
@@ -134,13 +106,6 @@ def register_model_adapter(
             f"Adapter for model class {model_cls.__name__} already registered."
         )
     _MODEL_ADAPTERS[model_cls] = adapter_factory
-
-
-register_model_adapter(
-    SequenceMLPEnsembleClassifier,
-    lambda model: MLPEnsembleCategoricalAdapter(model),
-    overwrite=True,
-)
 
 
 def register_model_layer_mapping(
@@ -301,10 +266,6 @@ class EmbeddingInputAdapter(LandscapeInputAdapter):
         return inputs
 
 
-class MLPEnsembleEmbeddingInputAdapter(EmbeddingInputAdapter):
-    name = "sequence_mlp_ensemble"
-
-
 InputAdapterFactory = Callable[..., LandscapeInputAdapter]
 _INPUT_ADAPTERS: dict[str, InputAdapterFactory] = {}
 
@@ -330,9 +291,6 @@ def resolve_input_adapter(
 
 
 register_input_adapter("embedding", EmbeddingInputAdapter, overwrite=True)
-register_input_adapter(
-    "sequence_mlp_ensemble", MLPEnsembleEmbeddingInputAdapter, overwrite=True
-)
 
 
 class LandscapeOutputAdapter(ABC):

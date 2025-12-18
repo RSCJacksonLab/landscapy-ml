@@ -7,8 +7,8 @@ from .data import (
     embed_sequences,
 )
 from .mlp_classification import SequenceMLPClassifier, SequenceMLPEnsembleClassifier
-from .trainer import TrainingJob, create_trainer, register_model, register_data
-from .adapters import (
+from .core.trainer import TrainingJob, create_trainer, register_model, register_data
+from .core.adaptor import (
     LandscapeInputAdapter,
     LandscapeOutputAdapter,
     ModelAdapter,
@@ -18,7 +18,7 @@ from .adapters import (
     register_model_layer_mapping,
     register_output_adapter,
 )
-from .inference import predict_landscape_records, predict_sequences
+from .core.inference import predict_landscape_records, predict_sequences
 from .data_utils import (
     build_config_from_dataframe,
     build_config_from_csv,

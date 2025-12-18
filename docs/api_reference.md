@@ -9,14 +9,14 @@ This is a lightweight catalog of the public symbols exported from `landscapyml._
 
 ## Models and trainers
 - `SequenceMLPClassifier`, `SequenceMLPEnsembleClassifier` (`mlp_classification.py`).
-- `TrainingJob`, `register_model`, `register_data`, `create_trainer` (`trainer.py`).
+- `TrainingJob`, `register_model`, `register_data`, `create_trainer` (`core/trainer.py`).
 
 ## Inference helpers
-- `predict_sequences`, `predict_landscape_records` (`inference.py`).
+- `predict_sequences`, `predict_landscape_records` (`core/inference.py`).
 
 ## Adapters
-- `ModelAdapter`, `LandscapeInputAdapter`, `LandscapeOutputAdapter` (`adapters.py`).
-- `register_model_adapter`, `register_model_layer_mapping`, `register_input_adapter`, `register_output_adapter`, `register_layer_adapter` (`adapters.py`).
+- `ModelAdapter`, `LandscapeInputAdapter`, `LandscapeOutputAdapter` (`core/adaptor.py`).
+- `register_model_adapter`, `register_model_layer_mapping`, `register_input_adapter`, `register_output_adapter`, `register_layer_adapter` (`core/adaptor.py`).
 
 ## CLI entry points
 - `python -m landscapyml` (via `__main__.py`): exposes `list`, `train`, `config-from-csv` commands.

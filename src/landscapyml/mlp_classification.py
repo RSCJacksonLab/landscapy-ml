@@ -1,11 +1,18 @@
 from __future__ import annotations
 
-from typing import Iterable, List, Optional
+from typing import Any, Iterable, List, Mapping, Optional
 
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from .core.adaptor import (
+    EmbeddingInputAdapter,
+    ModelAdapter,
+    register_input_adapter,
+    register_model_adapter,
+)
 
 
 class SequenceMLPClassifier(pl.LightningModule):
@@ -230,3 +237,41 @@ class SequenceMLPEnsembleClassifier(pl.LightningModule):
             lr=self.hparams.learning_rate,
             weight_decay=self.hparams.weight_decay,
         )
+
+
+class MLPEnsembleCategoricalAdapter(ModelAdapter):
+    layer_kind = "prob_categorical"
+
+    def __init__(self, model: SequenceMLPEnsembleClassifier) -> None:
+        self.model = model
+        self.embedding_domain = getattr(model, "embedding_domain", None)
+        self.embedding_model = getattr(model, "embedding_model", None)
+
+    def eval(self) -> None:
+        self.model.eval()
+
+    def to(self, device: torch.device | str) -> "MLPEnsembleCategoricalAdapter":
+        self.model.to(device)
+        return self
+
+    def predict(self, inputs: Any) -> Mapping[str, torch.Tensor]:
+        if not hasattr(self.model, "predict_with_uncertainty"):
+            raise ValueError(
+                "MLP ensemble adapter requires predict_with_uncertainty to be implemented."
+            )
+        mean, var = self.model.predict_with_uncertainty(inputs)
+        return {"mean": mean, "var": var}
+
+
+class MLPEnsembleEmbeddingInputAdapter(EmbeddingInputAdapter):
+    name = "sequence_mlp_ensemble"
+
+
+register_model_adapter(
+    SequenceMLPEnsembleClassifier,
+    lambda model: MLPEnsembleCategoricalAdapter(model),
+    overwrite=True,
+)
+register_input_adapter(
+    "sequence_mlp_ensemble", MLPEnsembleEmbeddingInputAdapter, overwrite=True
+)

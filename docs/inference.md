@@ -1,6 +1,6 @@
 # Inference and landscape integration
 
-Inference helpers live in `landscapyml.inference` and operate on trained models plus either raw sequences, FitnessLandscape records, or existing embeddings. Adapter ABCs and registries live in `landscapyml.adapters`.
+Inference helpers live in `landscapyml.core.inference` (re-exported in `landscapyml.inference`) and operate on trained models plus either raw sequences, FitnessLandscape records, or existing embeddings. Adapter ABCs and registries live in `landscapyml.core.adaptor` (re-exported in `landscapyml.adapters`).
 
 ## Direct sequence predictions
 - `predict_sequences(model, sequences, *, embedding_mode="hard", model_name="facebook/esm2_t6_8M_UR50D", device=None, embedding_batch_size=32) -> (mean_probs, variance)`
@@ -31,7 +31,7 @@ Inference helpers live in `landscapyml.inference` and operate on trained models 
 
 Example: registering a new model and adapter for a density-style output
 ```python
-from landscapyml.adapters import register_model_layer_mapping, register_layer_adapter
+from landscapyml.core.adaptor import register_model_layer_mapping, register_layer_adapter
 from fitness_landscape.core.fitness import ContinuousFitness
 
 class MyModel:
@@ -52,7 +52,7 @@ Returned tensors are moved to CPU for downstream use; callers can re-map to othe
 
 Example: custom model adapter for non-standard predict signatures
 ```python
-from landscapyml.adapters import register_model_adapter
+from landscapyml.core.adaptor import register_model_adapter
 
 class MyAdapter:
     layer_kind = "prob_categorical"

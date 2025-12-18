@@ -7,10 +7,10 @@ landscapy-ml provides sequence classification utilities built on landscapy and P
 - `landscapyml.data`: Embedding helpers, dataset and Lightning `DataModule` definitions.
 - `landscapyml.data_utils`: Convenience builders for creating configs from data frames or CSVs.
 - `landscapyml.mlp_classification`: MLP classifiers (single model and deep ensemble) for embeddings.
-- `landscapyml.trainer`: Trainer factory (`create_trainer`) and registries for models/data builders.
-- `landscapyml.trainer`: Registries for models/data builders plus the `TrainingJob` wrapper.
+- `landscapyml.core.trainer`: Trainer factory (`create_trainer`) and registries for models/data builders (`TrainingJob`).
 - `landscapyml.hydra_runner`: Programmatic Hydra entry point that wires configs to `TrainingJob`.
-- `landscapyml.inference`: Inference helpers for raw sequences, FitnessLandscape exports, and landscape layers.
+- `landscapyml.core.inference`: Inference helpers for raw sequences, FitnessLandscape exports, and landscape layers.
+- `landscapyml.core.adaptor`: Adapter ABCs and registries for mapping landscapes to models and predictions back to layers.
 - `landscapyml.logging_utils`: Lightweight logging configuration aligned with landscapy.
 - `landscapyml.__main__`: CLI entry point (`python -m landscapyml`).
 

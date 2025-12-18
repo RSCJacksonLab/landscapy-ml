@@ -4,7 +4,7 @@ from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
 
 import torch
 
-from .adapters import (
+from .adaptor import (
     LandscapeInputAdapter,
     ModelAdapter,
     infer_device,
@@ -16,7 +16,7 @@ from .adapters import (
     resolve_model_adapter,
     resolve_output_adapter,
 )
-from .data import embed_sequences
+from ..data import embed_sequences
 
 try:
     from fitness_landscape.core.fitness import ProbabilisticCategoricalFitness

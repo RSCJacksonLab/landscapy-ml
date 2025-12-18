@@ -7,20 +7,20 @@
   - Key args: same as single MLP plus `num_models`; `predict_with_uncertainty` aggregates mean/variance across ensemble members.
 
 ## Trainer factory
-- `create_trainer(...)` in `trainer.py` builds a `pytorch_lightning.Trainer` with:
+- `create_trainer(...)` in `core/trainer.py` builds a `pytorch_lightning.Trainer` with:
   - TensorBoard logging to `log_dir/experiment_name`.
   - Optional W&B logging (when `use_wandb` true and `wandb` available) configured via `wandb_project`, `wandb_entity`, `wandb_run_name`, `wandb_tags`, `wandb_dir`.
   - Checkpointing callback controlled by `checkpoint_dir`, `checkpoint_monitor`, `checkpoint_mode`, `checkpoint_every_n_epochs`, `save_top_k`.
   - Other knobs: `max_epochs`, `accelerator`, `devices`, `log_every_n_steps`, `num_sanity_val_steps`.
 
 ## Registries
-`trainer.py` maintains registries that map string keys to factories:
+`core/trainer.py` maintains registries that map string keys to factories:
 - Models: `sequence_mlp_classifier`, `sequence_mlp_ensemble`, `external`.
 - Data builders: `fitness_landscape_records`, `raw_sequences` (`SequenceClassificationDataModule.from_sequences`), `fitness_landscape` (alias for direct record usage).
 Use `register_model(name, factory, overwrite=False, requires_num_features=True)` or `register_data(name, factory, overwrite=False)` to extend the set of available components. Set `requires_num_features=False` for models that should not auto-infer feature dimensions. Factories must accept the kwargs passed via Hydra or `TrainingJob`. Example:
 ```python
 from landscapyml import register_model, register_data
-from landscapyml.trainer import TrainingJob
+from landscapyml.core.trainer import TrainingJob
 
 # Register a new model factory
 def build_custom_model(num_features: int, num_classes: int, **kwargs):

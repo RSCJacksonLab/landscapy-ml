@@ -10,7 +10,7 @@ from omegaconf import OmegaConf
 
 from .config import JobConfig
 from .logging_utils import configure_logger
-from .trainer import TrainingJob
+from .core.trainer import TrainingJob
 
 # Register structured config so Hydra can validate keys.
 cs = ConfigStore.instance()

@@ -30,7 +30,7 @@ def test_predict_sequences_uses_stubbed_embeddings(monkeypatch):
     # Stub embed_sequences to bypass heavy dependencies
     fake_embeddings = torch.randn(2, 3)
     monkeypatch.setattr(
-        "landscapyml.inference.embed_sequences",
+        "landscapyml.core.inference.embed_sequences",
         lambda *args, **kwargs: (fake_embeddings, None, None),
     )
     model = SequenceMLPEnsembleClassifier(num_features=3, num_classes=2, num_models=2)
@@ -60,7 +60,7 @@ def test_infer_fitness_layer_from_landscape_with_stub(monkeypatch):
             self.metadata = metadata
 
     monkeypatch.setattr(
-        "landscapyml.adapters.ProbabilisticCategoricalFitness", StubFitness
+        "landscapyml.core.adaptor.ProbabilisticCategoricalFitness", StubFitness
     )
 
     embeddings = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float)
@@ -121,7 +121,7 @@ def test_model_adapter_registration(monkeypatch):
             self.metadata = metadata
 
     monkeypatch.setattr(
-        "landscapyml.adapters.ProbabilisticCategoricalFitness", StubFitness
+        "landscapyml.core.adaptor.ProbabilisticCategoricalFitness", StubFitness
     )
 
     class DummyModel(torch.nn.Module):
