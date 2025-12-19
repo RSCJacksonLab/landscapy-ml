@@ -3,7 +3,7 @@ from pathlib import Path
 
 import torch
 
-from landscapyml.trainer import TrainingJob
+from landscapyml.core.trainer import TrainingJob
 
 
 def test_training_job_builds_components(tmp_path):

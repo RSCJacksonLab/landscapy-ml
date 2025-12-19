@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from landscapyml.inference import (
+from landscapyml.core.inference import (
     infer_fitness_layer_from_landscape,
     predict_landscape_records,
     predict_sequences,
