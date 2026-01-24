@@ -209,3 +209,5 @@ __marimo__/
 
 # Testing
 testing.*
+
+.vscode
