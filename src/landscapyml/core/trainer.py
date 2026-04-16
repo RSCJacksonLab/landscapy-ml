@@ -13,6 +13,7 @@ import torch
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from ..data import SequenceClassificationDataModule
+from ..landscape_pipeline import LandscapeDataModule
 from ..mlp_classification import SequenceMLPClassifier, SequenceMLPEnsembleClassifier
 
 ModelFactory = Callable[..., pl.LightningModule]
@@ -108,6 +109,11 @@ register_model(
     "external", build_external_model, overwrite=True, requires_num_features=False
 )
 # TODO: add additional models to the registry and expose selection in CLI/config.
+register_data(
+    "landscape_records",
+    LandscapeDataModule,
+    overwrite=True,
+)
 register_data(
     "fitness_landscape_records", SequenceClassificationDataModule, overwrite=True
 )
@@ -306,9 +312,11 @@ class TrainingJob:
         loader = dm.train_dataloader()
         batch = next(iter(loader))
         features = batch[0] if isinstance(batch, (tuple, list)) else batch
-        if not torch.is_tensor(features):
-            raise RuntimeError("Expected tensor features to infer num_features.")
-        return int(features.shape[-1])
+        if torch.is_tensor(features):
+            return int(features.shape[-1])
+        if hasattr(features, "x") and torch.is_tensor(features.x):
+            return int(features.x.shape[-1])
+        raise RuntimeError("Expected tensor features or a graph batch with '.x'.")
 
     def _build_model(self, dm: pl.LightningDataModule) -> pl.LightningModule:
         entry = _MODEL_REGISTRY[self.model_name]

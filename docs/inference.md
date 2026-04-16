@@ -22,12 +22,34 @@ Inference helpers live in `landscapyml.core.inference` (re-exported in `landscap
 
 ## Extensibility
 - `LandscapeInputAdapter`: ABC that yields batches from a landscape and converts them into model inputs.
+- `GraphTensorInputAdapter`: generic core adapter for models that consume `landscape.to_graph_tensor(...)`.
+- `NodeIndexInputAdapter`: generic core adapter for models that consume landscape node indices as inputs.
 - `LandscapeOutputAdapter`: ABC that converts model outputs into landscape fitness layers.
 - `register_input_adapter(name, factory, overwrite=False)`: Register a landscape input adapter (e.g., graph/structure extractors).
 - `register_model_adapter(model_cls, adapter_factory, overwrite=False)`: Register a model adapter for a specific class. Adapters expose a `layer_kind` and a `predict(inputs)` method.
 - `register_model_layer_mapping(model_cls, layer_kind, overwrite=False)`: Map additional model types to a logical layer kind string (e.g., `prob_categorical`) when the default adapter is sufficient.
 - `register_output_adapter(kind, adapter, overwrite=False)`: Register a landscape output adapter class/instance for a layer kind.
 - `register_layer_adapter(kind, adapter, overwrite=False)`: Convenience wrapper for function-style output adapters.
+
+Model-specific bridges should live at the package edge. See
+`landscapyml.examples.boltz2_adapter` for an example of how to integrate a
+specialized inference stack without making it part of the package core.
+
+For graph-native models, `landscapyml.examples.gat_fitness` reuses the core
+`GraphTensorInputAdapter` and also exposes a backwards-compatible
+`landscape_graph` alias:
+- `attach_graph_attention_predictions(...)` as a convenience wrapper around
+  `infer_fitness_layer_from_landscape(...)`
+- a `GraphAttentionFitnessRegressor` example whose outputs attach as a numeric
+  fitness layer
+
+For diffusion-prior GP workflows, `landscapyml.examples.gp_fitness` reuses the
+core `NodeIndexInputAdapter` and also exposes a backwards-compatible
+`landscape_node_index` alias:
+- `attach_diffusion_gp_predictions(...)` as a convenience wrapper around
+  `infer_fitness_layer_from_landscape(...)`
+- `DiffusionPriorExactGP`, which predicts numeric fitness values for the nodes
+  already present in a fixed landscape graph
 
 Example: registering a new model and adapter for a density-style output
 ```python

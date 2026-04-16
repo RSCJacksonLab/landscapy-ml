@@ -9,6 +9,9 @@ from landscapyml.core.adaptor import (
     DefaultModelAdapter,
     EmbeddingInputAdapter,
     FunctionOutputAdapter,
+    GraphTensorInputAdapter,
+    NodeIndexInputAdapter,
+    NumericOutputAdapter,
     ProbCategoricalOutputAdapter,
     normalize_adapter_outputs,
     register_input_adapter,
@@ -102,6 +105,46 @@ def test_embedding_input_adapter_yields_batches_and_metadata():
     assert meta["embedding_domain"] == "sequence"
 
 
+def test_graph_tensor_input_adapter_uses_landscape_graph_export():
+    class GraphLike:
+        def __init__(self):
+            self.moved_to = None
+
+        def to(self, device):
+            self.moved_to = device
+            return self
+
+    class GraphLandscape:
+        def __init__(self):
+            self.calls = []
+
+        def to_graph_tensor(self, tokenizer=None):
+            self.calls.append(tokenizer)
+            return GraphLike()
+
+    landscape = GraphLandscape()
+    adapter = GraphTensorInputAdapter(tokenizer="esm-test")
+    batches = list(adapter.iter_batches(landscape, batch_size=1))
+    assert len(batches) == 1
+    graph = adapter.to_model_inputs(batches[0], device=torch.device("cpu"))
+    assert landscape.calls == ["esm-test"]
+    assert graph.moved_to == torch.device("cpu")
+    assert adapter.metadata(landscape)["graph_tensor"] is True
+
+
+def test_node_index_input_adapter_batches_landscape_indices():
+    landscape = SimpleNamespace(sequences=["A", "B", "C"])
+    adapter = NodeIndexInputAdapter()
+    batches = list(adapter.iter_batches(landscape, batch_size=2))
+    assert len(batches) == 2
+    first = adapter.to_model_inputs(batches[0])
+    second = adapter.to_model_inputs(batches[1])
+    assert first.shape == (2, 1)
+    assert second.shape == (1, 1)
+    assert first[:, 0].tolist() == [0.0, 1.0]
+    assert second[:, 0].tolist() == [2.0]
+
+
 def test_input_adapter_registry_unknown_name_errors():
     with pytest.raises(ValueError):
         resolve_input_adapter("nonexistent")
@@ -150,6 +193,29 @@ def test_output_adapter_registry_with_function_wrapper():
     layer = out_adapter.to_layer({"value": 1}, None, {"x": 1}, "my_layer")
     assert layer["name"] == "my_layer"
     assert layer["meta"]["x"] == 1
+
+
+def test_numeric_output_adapter_builds_layer(monkeypatch):
+    class StubFitness:
+        @classmethod
+        def from_tensor(cls, name, tensor, metadata):
+            inst = cls()
+            inst.name = name
+            inst.tensor = tensor
+            inst.metadata = metadata
+            return inst
+
+    monkeypatch.setattr("landscapyml.core.adaptor.NumericFitness", StubFitness)
+    adapter = NumericOutputAdapter()
+    layer = adapter.to_layer(
+        {"output": torch.tensor([0.1, 0.2])},
+        None,
+        {"source": "test"},
+        "fitness_pred",
+    )
+    assert isinstance(layer, StubFitness)
+    assert layer.tensor.shape == (2, 1)
+    assert layer.metadata["source"] == "test"
 
 
 def test_infer_device_prefers_explicit_device_attribute():

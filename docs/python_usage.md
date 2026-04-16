@@ -2,6 +2,92 @@
 
 This guide stitches together the main APIs exposed in `landscapyml.__init__` for programmatic use.
 
+## Build a generic pipeline from a FitnessLandscape
+```python
+import torch
+from landscapyml import (
+    LandscapeDataModule,
+    export_landscape_records,
+    make_fitness_target_getter,
+)
+
+bundle = export_landscape_records(landscape, feature_view="embedding")
+
+dm = LandscapeDataModule(
+    train_data=bundle.records,
+    dataset_kwargs={
+        "target_getter": make_fitness_target_getter(
+            "family",
+            collapse_one_hot=True,
+            dtype=torch.long,
+        )
+    },
+    batch_size=16,
+)
+```
+
+## Predict unknown fitness values with a graph attention network
+This example requires `torch-geometric`.
+
+```python
+from landscapyml.examples.gat_fitness import (
+    GraphAttentionFitnessRegressor,
+    LandscapeGraphRegressionDataModule,
+    attach_graph_attention_predictions,
+)
+from landscapyml import create_trainer
+
+dm = LandscapeGraphRegressionDataModule.from_landscape(
+    landscape=landscape,
+    target_layer="measured_fitness",
+    val_fraction=0.1,
+    seed=0,
+)
+
+model = GraphAttentionFitnessRegressor(num_features=dm.train_graph.x.shape[-1])
+trainer = create_trainer(max_epochs=50, use_wandb=False)
+trainer.fit(model, datamodule=dm)
+
+predicted_layer = attach_graph_attention_predictions(
+    landscape,
+    model,
+    layer_name="gat_predicted_fitness",
+)
+```
+
+## Predict unknown fitness values with a diffusion-prior GP
+This example requires `gpytorch`.
+
+Use this when the landscape graph itself is the prior object of interest. The
+example fits `t_MAP` on the observed, unmasked part of the landscape, lifts that
+diffusion scale to a covariance over all nodes, and then trains an exact GP over
+observed node indices.
+
+```python
+from landscapyml.examples.gp_fitness import (
+    attach_diffusion_gp_predictions,
+    fit_diffusion_prior_gp,
+)
+
+fit = fit_diffusion_prior_gp(
+    landscape,
+    target_layer="measured_fitness",
+    mask_tokens=("X", "-"),
+    training_iters=100,
+    learning_rate=0.05,
+)
+
+predicted_layer = attach_diffusion_gp_predictions(
+    landscape,
+    fit.model,
+    layer_name="diffusion_gp_predicted_fitness",
+)
+```
+
+This is a transductive example over a fixed landscape graph. It imputes missing
+fitness values for nodes already present in the landscape; it is not meant to
+replace an inductive sequence model for out-of-graph generalization.
+
 ## Train on existing embeddings
 ```python
 import torch
@@ -41,7 +127,9 @@ trainer.fit(model, datamodule=dm)
 ```
 
 ## TrainingJob convenience
-Wraps data/model/trainer wiring and handles seeding and metadata logging.
+Wraps data/model/trainer wiring and handles seeding and metadata logging. The
+MLP model and classification datamodule shown here are examples layered on the
+generic landscape pipeline core.
 ```python
 from landscapyml import TrainingJob
 

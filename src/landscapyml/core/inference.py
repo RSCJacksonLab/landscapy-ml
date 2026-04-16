@@ -19,11 +19,11 @@ from .adaptor import (
 from ..data import embed_sequences
 
 try:
-    from fitness_landscape.core.fitness import ProbabilisticCategoricalFitness
+    from fitness_landscape.core.fitness import BaseFitnessLayer
     from fitness_landscape.core.landscape import FitnessLandscape
 except Exception:  # pragma: no cover - optional dependency
     FitnessLandscape = Any  # type: ignore
-    ProbabilisticCategoricalFitness = Any  # type: ignore
+    BaseFitnessLayer = Any  # type: ignore
 
 
 def predict_sequences(
@@ -122,7 +122,7 @@ def infer_fitness_layer_from_landscape(
     categories: Optional[Sequence[str]] = None,
     input_adapter: LandscapeInputAdapter | str | None = None,
     input_adapter_kwargs: Optional[Mapping[str, Any]] = None,
-) -> ProbabilisticCategoricalFitness:
+) -> BaseFitnessLayer:
     """
     Run inference on a ``FitnessLandscape`` and construct a predicted fitness layer.
 
@@ -153,8 +153,9 @@ def infer_fitness_layer_from_landscape(
 
     Returns
     -------
-    ProbabilisticCategoricalFitness
-        Fitness layer produced by the registered adapter.
+    BaseFitnessLayer
+        Fitness layer produced by the registered output adapter for the model's
+        logical ``layer_kind``.
 
     Raises
     ------

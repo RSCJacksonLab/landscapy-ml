@@ -4,9 +4,7 @@ import logging
 from typing import (
     Any,
     Dict,
-    Iterable,
     List,
-    Mapping,
     Optional,
     Sequence,
     Tuple,
@@ -16,8 +14,15 @@ from typing import (
 
 import torch
 import warnings
-from torch.utils.data import DataLoader, Dataset
-import pytorch_lightning as pl
+
+from .landscape_pipeline import (
+    LandscapeDataModule,
+    LandscapeDataset,
+    expand_record_batch as _expand_batch_dict,
+    make_fitness_target_getter,
+    make_preferred_input_getter,
+    normalize_records as _normalize_records,
+)
 
 SequenceLike = Union[str, Sequence[int], torch.Tensor]
 LabelLike = Union[int, Sequence[int], torch.Tensor]
@@ -277,163 +282,27 @@ def embed_sequences_to_records(
     return records
 
 
-def _expand_batch_dict(batch: Mapping[str, Any]) -> List[Dict[str, Any]]:
+class SequenceClassificationDataset(LandscapeDataset):
     """
-    Convert a batched dictionary into a list of per-sequence records.
-
-    Parameters
-    ----------
-    batch : Mapping[str, Any]
-        Dictionary returned by ``FitnessLandscape.to_sequence_tensors(as_batch=True)``.
-
-    Returns
-    -------
-    list[dict[str, Any]]
-        Per-sequence record dictionaries.
-
-    Raises
-    ------
-    ValueError
-        If required keys are missing from the batch.
-    """
-    if "sequence_tensor" not in batch or "fitness_tensors" not in batch:
-        raise ValueError(
-            "Batch dictionary must contain 'sequence_tensor' and 'fitness_tensors'."
-        )
-    seqs = torch.as_tensor(batch["sequence_tensor"])
-    fitness = {k: torch.as_tensor(v) for k, v in batch["fitness_tensors"].items()}
-    n = seqs.shape[0]
-    attention_mask = batch.get("attention_mask")
-    attention_mask_t = (
-        torch.as_tensor(attention_mask) if attention_mask is not None else None
-    )
-    embedding = batch.get("embedding")
-    embedding_t = torch.as_tensor(embedding) if embedding is not None else None
-
-    records: List[Dict[str, Any]] = []
-    for i in range(n):
-        rec = {
-            "sequence_tensor": seqs[i],
-            "fitness_tensors": {name: tensor[i] for name, tensor in fitness.items()},
-        }
-        if attention_mask_t is not None:
-            rec["attention_mask"] = attention_mask_t[i]
-        if embedding_t is not None:
-            rec["embedding"] = embedding_t[i]
-        records.append(rec)
-    return records
-
-
-def _normalize_records(data: Any) -> List[Dict[str, Any]]:
-    """
-    Normalize heterogeneous input into a list of per-sequence records.
-
-    Parameters
-    ----------
-    data : Any
-        Either ``None``, a mapping with batched tensors, or an iterable of record dictionaries.
-
-    Returns
-    -------
-    list[dict[str, Any]]
-        Normalized per-sequence records.
-
-    Raises
-    ------
-    ValueError
-        If the input does not conform to supported structures.
-    """
-    if data is None:
-        return []
-    if isinstance(data, Mapping):
-        return _expand_batch_dict(data)
-    if isinstance(data, Iterable) and not isinstance(data, (str, bytes, torch.Tensor)):
-        items = list(data)
-        if not items:
-            return []
-        if isinstance(items[0], Mapping):
-            return items  # type: ignore[return-value]
-    raise ValueError("Data must be a batch dict or an iterable of record dictionaries.")
-
-
-class SequenceClassificationDataset(Dataset):
-    """
-    Dataset turning FitnessLandscape exports into ``(features, label)`` pairs.
-
-    Parameters
-    ----------
-    records : Sequence[Mapping[str, Any]]
-        Sequence of record dictionaries containing features and labels.
-    label_key : str
-        Key inside ``fitness_tensors`` to use as the target label.
+    Classification specialization built on top of the generic landscape dataset.
     """
 
-    def __init__(self, records: Sequence[Mapping[str, Any]], label_key: str) -> None:
-        if not records:
-            raise ValueError("records must be a non-empty sequence.")
-        self.records = list(records)
+    def __init__(self, records: Sequence[Dict[str, Any]], label_key: str) -> None:
         self.label_key = label_key
-
-    def __len__(self) -> int:
-        return len(self.records)
-
-    def _feature_tensor(self, record: Mapping[str, Any]) -> torch.Tensor:
-        # Prefer precomputed embeddings; fall back to sequence_tensor.
-        feature = record.get("embedding", record.get("sequence_tensor"))
-        if feature is None:
-            raise ValueError("Record missing 'embedding' or 'sequence_tensor'.")
-        tensor = torch.as_tensor(feature)
-        if not tensor.is_floating_point():
-            tensor = tensor.float()
-        return tensor
-
-    def _label_tensor(self, record: Mapping[str, Any]) -> torch.Tensor:
-        fitness = record.get("fitness_tensors")
-        if not isinstance(fitness, Mapping) or self.label_key not in fitness:
-            raise ValueError(f"Record missing fitness label '{self.label_key}'.")
-        label = torch.as_tensor(fitness[self.label_key])
-        if label.ndim > 0 and label.numel() > 1:
-            label = label.argmax(dim=-1)
-        label = label.long().squeeze()
-        return label
-
-    def __getitem__(self, idx: int):
-        record = self.records[idx]
-        features = self._feature_tensor(record)
-        label = self._label_tensor(record)
-        return features, label
+        super().__init__(
+            records,
+            input_getter=make_preferred_input_getter("embedding", "sequence_tensor"),
+            target_getter=make_fitness_target_getter(
+                label_key,
+                collapse_one_hot=True,
+                dtype=torch.long,
+            ),
+        )
 
 
-class SequenceClassificationDataModule(pl.LightningDataModule):
+class SequenceClassificationDataModule(LandscapeDataModule):
     """
-    Lightning DataModule for sequence classification tasks.
-
-    Parameters
-    ----------
-    train_data : Any
-        Training records or batched mapping.
-    label_key : str
-        Label key used inside ``fitness_tensors``.
-    label_mapping : Sequence[str], optional
-        Optional category names.
-    val_data : Any, optional
-        Validation records or batched mapping.
-    test_data : Any, optional
-        Test records or batched mapping.
-    predict_data : Any, optional
-        Prediction records or batched mapping.
-    batch_size : int, default=32
-        Loader batch size.
-    num_workers : int, default=0
-        Number of workers for DataLoader.
-    pin_memory : bool, default=False
-        Whether to pin memory in DataLoaders.
-    shuffle : bool, default=True
-        Whether to shuffle training data.
-    val_split : float, default=0.0
-        Fraction of training records reserved for validation if ``val_data`` is empty.
-    val_seed : int, optional
-        Seed controlling the validation split.
+    Classification-focused wrapper around the generic landscape datamodule.
     """
 
     def __init__(
@@ -452,88 +321,23 @@ class SequenceClassificationDataModule(pl.LightningDataModule):
         val_split: float = 0.0,
         val_seed: Optional[int] = None,
     ) -> None:
-        super().__init__()
-        self.train_records = _normalize_records(train_data)
-        self.val_records = _normalize_records(val_data) if val_data is not None else []
-        self.test_records = (
-            _normalize_records(test_data) if test_data is not None else []
-        )
-        self.predict_records = (
-            _normalize_records(predict_data) if predict_data is not None else []
-        )
         self.label_key = label_key
         self.label_mapping = list(label_mapping) if label_mapping is not None else None
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.pin_memory = pin_memory
-        self.shuffle = shuffle
-        self.val_split = val_split
-        self.val_seed = val_seed
-
-        if not self.train_records:
-            raise ValueError("train_data must not be empty.")
-
-        self._train_ds: Optional[SequenceClassificationDataset] = None
-        self._val_ds: Optional[SequenceClassificationDataset] = None
-        self._test_ds: Optional[SequenceClassificationDataset] = None
-        self._predict_ds: Optional[SequenceClassificationDataset] = None
-
-    def setup(self, stage: Optional[str] = None) -> None:
-        if stage in (None, "fit"):
-            if not self.val_records and self.val_split > 0:
-                # Split train_records into train/val
-                rng = torch.Generator().manual_seed(self.val_seed or 0)
-                idx = torch.randperm(len(self.train_records), generator=rng).tolist()
-                split = int(len(idx) * (1 - self.val_split))
-                train_idx, val_idx = idx[:split], idx[split:]
-                self.val_records = [self.train_records[i] for i in val_idx]
-                self.train_records = [self.train_records[i] for i in train_idx]
-
-            self._train_ds = SequenceClassificationDataset(
-                self.train_records, self.label_key
-            )
-            if self.val_records:
-                self._val_ds = SequenceClassificationDataset(
-                    self.val_records, self.label_key
-                )
-        if stage in (None, "test"):
-            if self.test_records:
-                self._test_ds = SequenceClassificationDataset(
-                    self.test_records, self.label_key
-                )
-        if stage in (None, "predict"):
-            if self.predict_records:
-                self._predict_ds = SequenceClassificationDataset(
-                    self.predict_records, self.label_key
-                )
-
-    def _loader(
-        self, dataset: Optional[Dataset], shuffle: bool = False
-    ) -> Optional[DataLoader]:
-        if dataset is None:
-            return None
-        return DataLoader(
-            dataset,
-            batch_size=self.batch_size,
+        super().__init__(
+            train_data=train_data,
+            val_data=val_data,
+            test_data=test_data,
+            predict_data=predict_data,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
             shuffle=shuffle,
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
+            val_split=val_split,
+            val_seed=val_seed,
+            dataset_factory=SequenceClassificationDataset,
+            dataset_kwargs={"label_key": label_key},
+            predict_dataset_kwargs={"label_key": label_key},
         )
-
-    def train_dataloader(self) -> DataLoader:
-        loader = self._loader(self._train_ds, shuffle=self.shuffle)
-        if loader is None:
-            raise RuntimeError("Training dataset was not initialized.")
-        return loader
-
-    def val_dataloader(self) -> Optional[DataLoader]:
-        return self._loader(self._val_ds)
-
-    def test_dataloader(self) -> Optional[DataLoader]:
-        return self._loader(self._test_ds)
-
-    def predict_dataloader(self) -> Optional[DataLoader]:
-        return self._loader(self._predict_ds)
 
     @classmethod
     def from_sequences(

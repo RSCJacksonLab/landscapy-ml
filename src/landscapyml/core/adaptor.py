@@ -18,8 +18,9 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 try:
-    from fitness_landscape.core.fitness import ProbabilisticCategoricalFitness
+    from fitness_landscape.core.fitness import NumericFitness, ProbabilisticCategoricalFitness
 except Exception:  # pragma: no cover - optional dependency
+    NumericFitness = Any  # type: ignore
     ProbabilisticCategoricalFitness = Any  # type: ignore
 
 
@@ -266,6 +267,89 @@ class EmbeddingInputAdapter(LandscapeInputAdapter):
         return inputs
 
 
+class GraphTensorInputAdapter(LandscapeInputAdapter):
+    """
+    Generic adapter for models that consume ``landscape.to_graph_tensor()``.
+    """
+
+    name = "graph_tensor"
+
+    def __init__(self, *, tokenizer: Any | str | None = None) -> None:
+        self.tokenizer = tokenizer
+
+    def metadata(self, landscape: Any) -> Mapping[str, Any]:  # noqa: ARG002
+        info = {"input_adapter": self.name, "graph_tensor": True}
+        if self.tokenizer is not None:
+            info["tokenizer"] = str(self.tokenizer)
+        return info
+
+    def iter_batches(
+        self,
+        landscape: Any,
+        *,
+        batch_size: int,  # noqa: ARG002 - graph models operate on the full graph
+        num_workers: int = 0,  # noqa: ARG002
+        device: Optional[torch.device] = None,  # noqa: ARG002
+        **kwargs: Any,  # noqa: ARG002
+    ) -> Iterable[Any]:
+        if not hasattr(landscape, "to_graph_tensor"):
+            raise RuntimeError("Landscape does not implement to_graph_tensor().")
+        yield landscape.to_graph_tensor(tokenizer=self.tokenizer)
+
+    def to_model_inputs(
+        self, batch: Any, *, device: Optional[torch.device] = None
+    ) -> Any:
+        if device is not None and hasattr(batch, "to"):
+            return batch.to(device)
+        return batch
+
+
+class NodeIndexInputAdapter(LandscapeInputAdapter):
+    """
+    Generic adapter that exposes a landscape as batches of node indices.
+    """
+
+    name = "node_index"
+
+    def metadata(self, landscape: Any) -> Mapping[str, Any]:  # noqa: ARG002
+        return {
+            "input_adapter": self.name,
+            "graph_node_index": True,
+        }
+
+    def iter_batches(
+        self,
+        landscape: Any,
+        *,
+        batch_size: int,
+        num_workers: int = 0,
+        device: Optional[torch.device] = None,  # noqa: ARG002
+        **kwargs: Any,  # noqa: ARG002
+    ) -> Iterable[Any]:
+        if hasattr(landscape, "sequences"):
+            num_items = len(landscape.sequences)
+        else:
+            try:
+                num_items = len(landscape)
+            except TypeError as exc:
+                raise RuntimeError(
+                    "Landscape does not expose a sequence count for node-index batching."
+                ) from exc
+        indices = torch.arange(num_items, dtype=torch.float32).view(-1, 1)
+        dataset = TensorDataset(indices)
+        loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers)
+        for (batch_indices,) in loader:
+            yield batch_indices
+
+    def to_model_inputs(
+        self, batch: Any, *, device: Optional[torch.device] = None
+    ) -> Any:
+        tensor = batch[0] if isinstance(batch, (tuple, list)) else batch
+        if device is not None and torch.is_tensor(tensor):
+            return tensor.to(device)
+        return tensor
+
+
 InputAdapterFactory = Callable[..., LandscapeInputAdapter]
 _INPUT_ADAPTERS: dict[str, InputAdapterFactory] = {}
 
@@ -291,6 +375,8 @@ def resolve_input_adapter(
 
 
 register_input_adapter("embedding", EmbeddingInputAdapter, overwrite=True)
+register_input_adapter("graph_tensor", GraphTensorInputAdapter, overwrite=True)
+register_input_adapter("node_index", NodeIndexInputAdapter, overwrite=True)
 
 
 class LandscapeOutputAdapter(ABC):
@@ -359,6 +445,48 @@ class ProbCategoricalOutputAdapter(LandscapeOutputAdapter):
         )
 
 
+class NumericOutputAdapter(LandscapeOutputAdapter):
+    layer_kind = "numeric"
+
+    def to_layer(
+        self,
+        outputs: Mapping[str, torch.Tensor],
+        categories: Optional[Sequence[str]],  # noqa: ARG002 - not used for numeric layers
+        metadata: Mapping[str, Any],
+        layer_name: str,
+    ) -> Any:
+        tensor = outputs.get("output")
+        if tensor is None and len(outputs) == 1:
+            tensor = next(iter(outputs.values()))
+        if tensor is None:
+            raise ValueError(
+                "Numeric adapter expects a single tensor output or an 'output' key."
+            )
+        if not torch.is_tensor(tensor):
+            raise TypeError("Numeric adapter received non-tensor output.")
+
+        arr = tensor.detach().cpu()
+        if arr.ndim == 0:
+            arr = arr.view(1, 1)
+        elif arr.ndim == 1:
+            arr = arr.unsqueeze(-1)
+        elif arr.ndim > 2:
+            raise ValueError("Numeric adapter expects a 1-D or 2-D tensor output.")
+
+        meta = dict(metadata)
+        if hasattr(NumericFitness, "from_tensor"):
+            return NumericFitness.from_tensor(
+                name=layer_name,
+                tensor=arr,
+                metadata=meta,
+            )
+        return NumericFitness(
+            name=layer_name,
+            values=arr.numpy().tolist(),
+            metadata=meta,
+        )
+
+
 OutputAdapterFactory = Callable[[], LandscapeOutputAdapter]
 _OUTPUT_ADAPTERS: dict[str, OutputAdapterFactory] = {}
 
@@ -393,6 +521,9 @@ def resolve_output_adapter(kind: str) -> LandscapeOutputAdapter:
     return _OUTPUT_ADAPTERS[kind]()
 
 
+register_output_adapter(
+    NumericOutputAdapter.layer_kind, NumericOutputAdapter, overwrite=True
+)
 register_output_adapter(
     ProbCategoricalOutputAdapter.layer_kind, ProbCategoricalOutputAdapter, overwrite=True
 )
