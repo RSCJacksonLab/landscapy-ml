@@ -2,7 +2,7 @@ defaults:
   - landscapyml_job
   - _self_
 
-model: sequence_gp_classifier
+model: sequence_mlp_classifier
 data: raw_sequences
 model_kwargs: {}
 data_kwargs: {}

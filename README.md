@@ -1,7 +1,14 @@
 # landscapy-ml
 
-Sequence classification utilities for carbonic anhydrase families built on top of
-`landscapy`, GPyTorch, and PyTorch Lightning.
+`landscapy-ml` is a thin bridge between `landscapy` landscape objects and ML
+training or inference pipelines.
+
+The package now has a deliberate split:
+- Core pipeline utilities export `FitnessLandscape` objects into ML-ready records,
+  datasets, and Lightning datamodules.
+- Example implementations, such as the sequence MLP classifiers and the Boltz-2
+  adapter, sit on top of that generic interface instead of defining the package
+  architecture.
 
 ## Installation
 
@@ -11,6 +18,9 @@ pip install landscapy-ml
 pip install .
 # development mode
 pip install -e ".[dev]"
+# optional graph / GP examples
+pip install -e ".[graph]"
+pip install -e ".[gp]"
 # enable formatting hooks
 pre-commit install
 ```
@@ -19,39 +29,33 @@ pre-commit install
 
 ```python
 import torch
-from torch.utils.data import DataLoader, TensorDataset
 from landscapyml import (
-    SequenceGPClassifier,
-    SequenceClassificationDataModule,
-    create_trainer,
+    LandscapeDataModule,
+    SequenceMLPEnsembleClassifier,  # example model built on the generic core
     TrainingJob,
+    create_trainer,                 # example Lightning trainer factory
+    export_landscape_records,
+    make_fitness_target_getter,
 )
 
-# Example data: embeddings of shape [batch, embedding_dim] and integer labels
-embeddings = torch.randn(16, 128)
-labels = torch.randint(0, 4, (16,))
-
-dataset = TensorDataset(embeddings, labels)
-loader = DataLoader(dataset, batch_size=8, shuffle=True)
-
-model = SequenceGPClassifier(num_features=128, num_classes=4, num_inducing=32)
-trainer = create_trainer(max_epochs=5)
-
-trainer.fit(model, train_dataloaders=loader)
-
-model.eval()
-probs, uncertainty = model.predict_with_uncertainty(embeddings)
-
-# Using a DataModule from FitnessLandscape exports
-# records = landscape.to_sequence_tensors(
-#     as_batch=False,
-#     feature_view="embedding",
-#     include_embeddings=False,
+# Export a landscape into generic ML records
+# bundle = export_landscape_records(landscape, feature_view="embedding")
+# dm = LandscapeDataModule(
+#     train_data=bundle.records,
+#     dataset_kwargs={
+#         "target_getter": make_fitness_target_getter(
+#             "label",
+#             collapse_one_hot=True,
+#             dtype=torch.long,
+#         )
+#     },
+#     batch_size=8,
 # )
-# dm = SequenceClassificationDataModule(train_data=records, label_key="label", batch_size=8)
+# model = SequenceMLPEnsembleClassifier(num_features=128, num_classes=4, num_models=3)
+# trainer = create_trainer(max_epochs=5)
 # trainer.fit(model, datamodule=dm)
 
-# Embedding raw sequences with landscapy (hard/soft ESM) before training
+# Example-only convenience path: embedding raw sequences with landscapy
 # from landscapyml import embed_sequences_to_records
 # sequences = ["ACDE", "WXYZ"]
 # labels = [0, 1]
@@ -63,12 +67,12 @@ probs, uncertainty = model.predict_with_uncertainty(embeddings)
 #     model_name="facebook/esm2_t6_8M_UR50D",
 # )
 # dm = SequenceClassificationDataModule(train_data=records, label_key="label", batch_size=4)
-# model = SequenceGPClassifier(num_features=records[0]["embedding"].shape[-1], num_classes=2)
+# model = SequenceMLPEnsembleClassifier(num_features=records[0]["embedding"].shape[-1], num_classes=2)
 # trainer.fit(model, datamodule=dm)
 
-# End-to-end training job wrapper (for upcoming CLI)
+# Example-only end-to-end training job wrapper
 # job = TrainingJob(
-#     model_name="sequence_gp_classifier",
+#     model_name="sequence_mlp_ensemble",
 #     data_name="raw_sequences",
 #     model_kwargs={"num_classes": 2},
 #     data_kwargs={
@@ -100,12 +104,16 @@ probs, uncertainty = model.predict_with_uncertainty(embeddings)
 #   trainer_kwargs.wandb_project=my_project trainer_kwargs.wandb_run_name=test_run
 #
 # Override config directory (if you keep custom configs elsewhere)
-# python -m landscapyml train --config-path /path/to/conf model=sequence_gp_classifier
+# python -m landscapyml train --config-path /path/to/conf model=sequence_mlp_classifier
 #
 # Hydra multirun (sweep over num_classes)
 # python -m landscapyml train -m model_kwargs.num_classes=2,4 trainer_kwargs.max_epochs=5
 ```
 
-`SequenceGPClassifier` wraps a variational GPyTorch model with a softmax
-likelihood, enabling classification with predictive uncertainty estimates on
-unseen amino-acid sequence embeddings.
+`SequenceMLPEnsembleClassifier` is kept as a reference implementation for
+embedding-based sequence classification. For model-specific adapters, see
+`landscapyml.examples`, including the optional `boltz2_adapter` example and the
+graph-based `gat_fitness` and `gp_fitness` examples for predicting unknown
+numeric fitnesses on landscape graphs. The GAT example is inductive over node
+features on the fixed graph, while the GP example is a diffusion-prior,
+transductive imputation model over the existing landscape nodes.

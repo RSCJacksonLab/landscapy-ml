@@ -33,7 +33,7 @@ class JobConfig:
         Whether to run evaluation via ``Trainer.test``.
     """
 
-    model: str = "sequence_gp_classifier"
+    model: str = "sequence_mlp_classifier"
     data: str = "raw_sequences"
     # TODO: extend model/data selections when more registry entries are added.
     model_kwargs: Dict[str, Any] = field(default_factory=dict)

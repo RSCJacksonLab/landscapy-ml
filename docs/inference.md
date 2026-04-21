@@ -1,11 +1,11 @@
 # Inference and landscape integration
 
-Inference helpers live in `landscapyml.inference` and operate on trained models plus either raw sequences, FitnessLandscape records, or existing embeddings.
+Inference helpers live in `landscapyml.core.inference` (re-exported in `landscapyml.inference`) and operate on trained models plus either raw sequences, FitnessLandscape records, or existing embeddings. Adapter ABCs and registries live in `landscapyml.core.adaptor` (re-exported in `landscapyml.adapters`).
 
 ## Direct sequence predictions
 - `predict_sequences(model, sequences, *, embedding_mode="hard", model_name="facebook/esm2_t6_8M_UR50D", device=None, embedding_batch_size=32) -> (mean_probs, variance)`
   - Embeds raw sequences via `embed_sequences` (no tokens returned) and runs `model.predict_with_uncertainty`.
-  - The model must implement `predict_with_uncertainty` (available on `SequenceGPClassifier` and `SequenceMLPEnsembleClassifier`).
+  - The model must implement `predict_with_uncertainty` (available on `SequenceMLPEnsembleClassifier`).
 
 ## FitnessLandscape record predictions
 - `predict_landscape_records(model, records) -> (mean_probs, variance)`
@@ -13,20 +13,47 @@ Inference helpers live in `landscapyml.inference` and operate on trained models 
   - Uses `embedding` if present, else `sequence_tensor`, stacks tensors, and forwards to `predict_with_uncertainty`.
 
 ## FitnessLandscape layer attachment
-- `infer_fitness_layer_from_landscape(landscape, model, *, batch_size=256, num_workers=0, device=None, attach=True, inplace=True, layer_name="predicted_fitness", categories=None)`
-  - Determines the layer kind for the model via `_MODEL_TO_LAYER` mapping (defaults cover GP and MLP ensemble).
-  - Ensures embedding domain/model compatibility between the model and landscape when available.
-  - Computes embeddings on the landscape if missing (using `landscape.compute_plm_embeddings`).
-  - Batches embeddings through the model and builds a `ProbabilisticCategoricalFitness` layer via the registered adapter. When `attach` is true, attaches to the landscape (copying if `inplace` is false).
+- `infer_fitness_layer_from_landscape(landscape, model, *, batch_size=256, num_workers=0, device=None, attach=True, inplace=True, layer_name="predicted_fitness", categories=None, input_adapter=None, input_adapter_kwargs=None)`
+  - Resolves a model adapter for `model` (registered or provided) to standardize inference.
+  - Resolves a landscape input adapter (defaults to embedding-based extraction).
+  - Ensures embedding domain/model compatibility between the adapter and landscape when available.
+  - Batches inputs through the adapter and builds a `ProbabilisticCategoricalFitness` layer via the registered output adapter. When `attach` is true, attaches to the landscape (copying if `inplace` is false).
   - The `fitness_landscape` dependency is optional; when absent, imports fall back to stub types and landscape-related helpers are unavailable.
 
 ## Extensibility
-- `register_model_layer_mapping(model_cls, layer_kind, overwrite=False)`: Map additional model types to a logical layer kind string (e.g., `prob_categorical`). This controls how models are interpreted when attaching to a `FitnessLandscape`.
-- `register_layer_adapter(kind, adapter, overwrite=False)`: Provide custom adapter functions that convert model outputs into landscape fitness layers. An adapter receives `(outputs_dict, categories, metadata_dict, layer_name)` and returns a `Fitness` layer.
+- `LandscapeInputAdapter`: ABC that yields batches from a landscape and converts them into model inputs.
+- `GraphTensorInputAdapter`: generic core adapter for models that consume `landscape.to_graph_tensor(...)`.
+- `NodeIndexInputAdapter`: generic core adapter for models that consume landscape node indices as inputs.
+- `LandscapeOutputAdapter`: ABC that converts model outputs into landscape fitness layers.
+- `register_input_adapter(name, factory, overwrite=False)`: Register a landscape input adapter (e.g., graph/structure extractors).
+- `register_model_adapter(model_cls, adapter_factory, overwrite=False)`: Register a model adapter for a specific class. Adapters expose a `layer_kind` and a `predict(inputs)` method.
+- `register_model_layer_mapping(model_cls, layer_kind, overwrite=False)`: Map additional model types to a logical layer kind string (e.g., `prob_categorical`) when the default adapter is sufficient.
+- `register_output_adapter(kind, adapter, overwrite=False)`: Register a landscape output adapter class/instance for a layer kind.
+- `register_layer_adapter(kind, adapter, overwrite=False)`: Convenience wrapper for function-style output adapters.
+
+Model-specific bridges should live at the package edge. See
+`landscapyml.examples.boltz2_adapter` for an example of how to integrate a
+specialized inference stack without making it part of the package core.
+
+For graph-native models, `landscapyml.examples.gat_fitness` reuses the core
+`GraphTensorInputAdapter` and also exposes a backwards-compatible
+`landscape_graph` alias:
+- `attach_graph_attention_predictions(...)` as a convenience wrapper around
+  `infer_fitness_layer_from_landscape(...)`
+- a `GraphAttentionFitnessRegressor` example whose outputs attach as a numeric
+  fitness layer
+
+For diffusion-prior GP workflows, `landscapyml.examples.gp_fitness` reuses the
+core `NodeIndexInputAdapter` and also exposes a backwards-compatible
+`landscape_node_index` alias:
+- `attach_diffusion_gp_predictions(...)` as a convenience wrapper around
+  `infer_fitness_layer_from_landscape(...)`
+- `DiffusionPriorExactGP`, which predicts numeric fitness values for the nodes
+  already present in a fixed landscape graph
 
 Example: registering a new model and adapter for a density-style output
 ```python
-from landscapyml.inference import register_model_layer_mapping, register_layer_adapter
+from landscapyml.core.adaptor import register_model_layer_mapping, register_layer_adapter
 from fitness_landscape.core.fitness import ContinuousFitness
 
 class MyModel:
@@ -44,3 +71,20 @@ register_layer_adapter("continuous_density", my_layer_adapter)
 ```
 
 Returned tensors are moved to CPU for downstream use; callers can re-map to other devices as needed.
+
+Example: custom model adapter for non-standard predict signatures
+```python
+from landscapyml.core.adaptor import register_model_adapter
+
+class MyAdapter:
+    layer_kind = "prob_categorical"
+
+    def __init__(self, model):
+        self.model = model
+
+    def predict(self, inputs):
+        mean, var = self.model.infer(inputs)
+        return {"mean": mean, "var": var}
+
+register_model_adapter(MyExternalModel, lambda model: MyAdapter(model))
+```

@@ -4,7 +4,7 @@ Hydra drives training and testing. The structured config schema is defined in `c
 
 ## Default config
 The baseline config ships inside the package at `landscapyml/conf/config.yaml` (also available at the repo root `conf/config.yaml`). Key fields:
-- `model`: Registry key for the model factory (see `trainer.py`). Default `sequence_gp_classifier`.
+- `model`: Registry key for the model factory (see `trainer.py`). Default `sequence_mlp_classifier`.
 - `data`: Registry key for the data builder. Default `raw_sequences` (embeds raw sequences before training).
 - `model_kwargs`: Passed to the selected model factory (e.g., `num_classes`, `num_inducing`).
 - `data_kwargs`: Passed to the data builder (e.g., sequence lists, labels, label mapping, embedding options).
@@ -32,3 +32,9 @@ Pass standard Hydra overrides at the CLI or programmatically through `run_with_h
 - Change the model and class count: `model=sequence_mlp_classifier model_kwargs.num_classes=3`
 - Adjust validation split: `data_kwargs.val_split=0.2 data_kwargs.val_seed=42`
 - Disable W&B: `trainer_kwargs.use_wandb=false`
+
+## External models
+To load an external LightningModule by class path, set `model=external` and provide a `class_path` plus optional constructor args:
+- `model=external model_kwargs.class_path=mypkg.models.MyModule model_kwargs.num_classes=3`
+- Or pass nested kwargs: `model_kwargs.class_path=mypkg.models.MyModule model_kwargs.init_kwargs.num_classes=3`
+- If the external class is not a LightningModule, provide an adapter wrapper via `model_kwargs.adapter_path`.

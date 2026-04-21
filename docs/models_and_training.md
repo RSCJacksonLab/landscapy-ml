@@ -1,29 +1,33 @@
 # Models, trainers, and jobs
 
 ## Model implementations
-- `SequenceGPClassifier` (`gp_classification.py`): Variational Gaussian process classifier with a softmax likelihood (`gpytorch.likelihoods.SoftmaxLikelihood`).
-  - Key args: `num_features`, `num_classes`, `inducing_points` or `num_inducing`, `learning_rate`, `weight_decay`, `num_data` (optional dataset size for ELBO), `embedding_domain`, `embedding_model` (stored for compatibility checks during inference).
-  - Training/validation steps log loss and accuracies (overall and per-class). `predict_with_uncertainty` returns `(mean_probs, variance)` over classes.
-- `SequenceMLPClassifier` (`mlp_classification.py`): Single MLP classifier for embeddings.
+- `SequenceMLPClassifier` (`mlp_classification.py`): Example single MLP classifier for embeddings.
   - Key args: `num_features`, `num_classes`, `hidden_sizes`, `dropout`, optimizer hyperparameters.
-- `SequenceMLPEnsembleClassifier` (`mlp_classification.py`): Deep ensemble of MLP classifiers for uncertainty estimation.
+- `SequenceMLPEnsembleClassifier` (`mlp_classification.py`): Example deep ensemble of MLP classifiers for uncertainty estimation.
   - Key args: same as single MLP plus `num_models`; `predict_with_uncertainty` aggregates mean/variance across ensemble members.
+- `GraphAttentionFitnessRegressor` (`examples/gat_fitness.py`): Example graph attention network for semi-supervised node regression over a landscape graph.
+  - Key args: `in_channels` or `num_features`, `hidden_channels`, `num_layers`, `heads`, `dropout`, optimizer hyperparameters.
+  - Requires `torch-geometric`.
+- `DiffusionPriorExactGP` (`examples/gp_fitness.py`): Example exact GP regressor using a precomputed landscape diffusion covariance over node indices.
+  - Key args: `train_x`, `train_y`, `covariance_matrix`, `mean_mode`, `jitter`.
+  - Requires `gpytorch`.
+  - Intended as a transductive graph-imputation example on a fixed landscape rather than a general sequence-to-fitness model.
 
 ## Trainer factory
-- `create_trainer(...)` in `gp_classification.py` builds a `pytorch_lightning.Trainer` with:
+- `create_trainer(...)` in `core/trainer.py` builds a `pytorch_lightning.Trainer` with:
   - TensorBoard logging to `log_dir/experiment_name`.
   - Optional W&B logging (when `use_wandb` true and `wandb` available) configured via `wandb_project`, `wandb_entity`, `wandb_run_name`, `wandb_tags`, `wandb_dir`.
   - Checkpointing callback controlled by `checkpoint_dir`, `checkpoint_monitor`, `checkpoint_mode`, `checkpoint_every_n_epochs`, `save_top_k`.
   - Other knobs: `max_epochs`, `accelerator`, `devices`, `log_every_n_steps`, `num_sanity_val_steps`.
 
 ## Registries
-`trainer.py` maintains registries that map string keys to factories:
-- Models: `sequence_gp_classifier`, `sequence_mlp_classifier`, `sequence_mlp_ensemble`.
-- Data builders: `fitness_landscape_records`, `raw_sequences` (`SequenceClassificationDataModule.from_sequences`), `fitness_landscape` (alias for direct record usage).
-Use `register_model(name, factory, overwrite=False)` or `register_data(name, factory, overwrite=False)` to extend the set of available components. Factories must accept the kwargs passed via Hydra or `TrainingJob`. Example:
+`core/trainer.py` maintains registries that map string keys to factories:
+- Models: `sequence_mlp_classifier`, `sequence_mlp_ensemble`, `external`.
+- Data builders: `landscape_records`, `fitness_landscape_records`, `raw_sequences` (`SequenceClassificationDataModule.from_sequences`), `fitness_landscape`.
+Use `register_model(name, factory, overwrite=False, requires_num_features=True)` or `register_data(name, factory, overwrite=False)` to extend the set of available components. Set `requires_num_features=False` for models that should not auto-infer feature dimensions. Factories must accept the kwargs passed via Hydra or `TrainingJob`. Example:
 ```python
 from landscapyml import register_model, register_data
-from landscapyml.trainer import TrainingJob
+from landscapyml.core.trainer import TrainingJob
 
 # Register a new model factory
 def build_custom_model(num_features: int, num_classes: int, **kwargs):
@@ -47,6 +51,40 @@ job = TrainingJob(
 trainer, model, dm = job.run()
 ```
 
+Importing `landscapyml.examples.gat_fitness` also self-registers:
+- model: `graph_attention_regressor`
+- data builder: `landscape_graph_regression`
+
+Those example registry entries are intended for node-regression workflows where
+the supervision target is a numeric fitness layer on a single `FitnessLandscape`
+graph.
+
+Importing `landscapyml.examples.gp_fitness` self-registers:
+- input adapter: `landscape_node_index`
+
+That adapter lets graph-imputation models consume a `FitnessLandscape` as a
+sequence of node indices for inference-time attachment through
+`infer_fitness_layer_from_landscape(...)`.
+
+## External models
+The `external` model entry instantiates a LightningModule by class path and optional adapter:
+```python
+from landscapyml import TrainingJob
+
+job = TrainingJob(
+    model_name="external",
+    data_name="fitness_landscape_records",
+    model_kwargs={
+        "class_path": "mypkg.models.MyLightningModule",
+        "init_kwargs": {"num_classes": 3},
+    },
+    data_kwargs={"train_data": records, "label_key": "label"},
+    trainer_kwargs={"max_epochs": 10},
+)
+trainer, model, dm = job.run()
+```
+If the external class is not a LightningModule, supply an adapter via `model_kwargs.adapter_path` that wraps the model into a LightningModule.
+
 ## TrainingJob workflow
 `TrainingJob` (dataclass in `trainer.py`) coordinates building the data module, model, and trainer from provided kwargs and registry keys.
 - Performs validation that chosen `model_name` and `data_name` exist in the registries.
@@ -61,7 +99,7 @@ Typical programmatic training flow:
 from landscapyml import TrainingJob
 
 job = TrainingJob(
-    model_name="sequence_gp_classifier",
+    model_name="sequence_mlp_classifier",
     data_name="raw_sequences",
     model_kwargs={"num_classes": 3},
     data_kwargs={
