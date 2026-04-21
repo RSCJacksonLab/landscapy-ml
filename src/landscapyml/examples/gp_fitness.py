@@ -202,6 +202,7 @@ def build_diffusion_gp_artifacts_from_landscape(
     *,
     target_layer: str,
     aggregate_func: Optional[Callable[..., Any]] = np.mean,
+    train_indices: Sequence[int] | torch.Tensor | None = None,
     mask_tokens: Sequence[str] = DEFAULT_MASK_TOKENS,
     drop_masked_sequences_for_t_map: bool = True,
     t_min: float = 0.01,
@@ -218,9 +219,11 @@ def build_diffusion_gp_artifacts_from_landscape(
     Build the fixed diffusion covariance and node-index training inputs for an
     exact GP over a single landscape graph.
 
-    ``t_MAP`` is fit on the observed, unmasked subgraph when possible, then the
+    ``t_MAP`` is fit on the training, unmasked subgraph when possible, then the
     resulting diffusion scale is reused to construct a covariance over the full
-    landscape graph, including masked sequences.
+    landscape graph, including held-out and masked sequences. If
+    ``train_indices`` is omitted, all finite targets are treated as training
+    observations.
     """
 
     _require_landscapy_bits()
@@ -243,11 +246,28 @@ def build_diffusion_gp_artifacts_from_landscape(
 
     num_nodes = full_targets.shape[0]
     observed_mask = torch.isfinite(full_targets)
-    train_indices = torch.nonzero(observed_mask, as_tuple=False).view(-1)
-    if train_indices.numel() < 2:
+    if train_indices is None:
+        resolved_train_indices = torch.nonzero(observed_mask, as_tuple=False).view(-1)
+    else:
+        resolved_train_indices = torch.as_tensor(train_indices, dtype=torch.long).view(-1)
+        if resolved_train_indices.numel() > 0:
+            if bool((resolved_train_indices < 0).any()) or bool(
+                (resolved_train_indices >= num_nodes).any()
+            ):
+                raise ValueError(
+                    f"train_indices contains node indices outside [0, {num_nodes})."
+                )
+            resolved_train_indices = torch.unique(resolved_train_indices, sorted=True)
+            if not bool(observed_mask[resolved_train_indices].all()):
+                raise ValueError(
+                    "train_indices contains nodes without finite target values."
+                )
+    if resolved_train_indices.numel() < 2:
         raise ValueError(
             "At least two observed numeric fitness values are required for the GP example."
         )
+    train_mask = torch.zeros(num_nodes, dtype=torch.bool)
+    train_mask[resolved_train_indices] = True
 
     normalized_mask_tokens = _normalize_mask_tokens(mask_tokens)
     if drop_masked_sequences_for_t_map:
@@ -264,16 +284,16 @@ def build_diffusion_gp_artifacts_from_landscape(
     else:
         clean_sequence_mask = np.ones(num_nodes, dtype=bool)
 
-    observed_np = observed_mask.detach().cpu().numpy()
-    fit_mask = clean_sequence_mask & observed_np
+    train_np = train_mask.detach().cpu().numpy()
+    fit_mask = clean_sequence_mask & train_np
     if int(np.sum(fit_mask)) < 2:
         if drop_masked_sequences_for_t_map:
             warnings.warn(
                 "Fewer than two observed, fully unmasked nodes were available for "
-                "diffusion-scale fitting; falling back to all observed nodes.",
+                "diffusion-scale fitting; falling back to all training nodes.",
                 RuntimeWarning,
             )
-            fit_mask = observed_np
+            fit_mask = train_np
         if int(np.sum(fit_mask)) < 2:
             raise ValueError(
                 "Unable to identify enough observed nodes to estimate the diffusion scale."
@@ -312,8 +332,8 @@ def build_diffusion_gp_artifacts_from_landscape(
     covariance_tensor = torch.as_tensor(covariance, dtype=torch.float32)
 
     all_inputs = torch.arange(num_nodes, dtype=torch.float32).view(-1, 1)
-    train_inputs = all_inputs[train_indices]
-    train_targets = full_targets[train_indices]
+    train_inputs = all_inputs[resolved_train_indices]
+    train_targets = full_targets[resolved_train_indices]
 
     return DiffusionGPArtifacts(
         covariance_matrix=covariance_tensor,
@@ -322,9 +342,9 @@ def build_diffusion_gp_artifacts_from_landscape(
         train_targets=train_targets,
         full_targets=full_targets,
         observed_mask=observed_mask,
-        predict_mask=~observed_mask,
+        predict_mask=~train_mask,
         fit_indices=torch.as_tensor(fit_indices_np, dtype=torch.long),
-        train_indices=train_indices.to(torch.long),
+        train_indices=resolved_train_indices.to(torch.long),
         t_map=t_map,
         signal_variance=signal_variance,
         mask_tokens=normalized_mask_tokens,
@@ -444,6 +464,7 @@ def fit_diffusion_prior_gp(
     *,
     target_layer: str,
     aggregate_func: Optional[Callable[..., Any]] = np.mean,
+    train_indices: Sequence[int] | torch.Tensor | None = None,
     mask_tokens: Sequence[str] = DEFAULT_MASK_TOKENS,
     drop_masked_sequences_for_t_map: bool = True,
     t_min: float = 0.01,
@@ -465,7 +486,9 @@ def fit_diffusion_prior_gp(
     Fit an exact diffusion-prior GP on observed node fitness values.
 
     This example is intended for small to medium landscapes where exact GP
-    inference remains tractable.
+    inference remains tractable. If ``train_indices`` is supplied, held-out
+    finite targets remain available for evaluation but are not used for
+    diffusion-scale fitting or GP likelihood optimization.
     """
 
     gp = _load_gpytorch()
@@ -473,6 +496,7 @@ def fit_diffusion_prior_gp(
         landscape,
         target_layer=target_layer,
         aggregate_func=aggregate_func,
+        train_indices=train_indices,
         mask_tokens=mask_tokens,
         drop_masked_sequences_for_t_map=drop_masked_sequences_for_t_map,
         t_min=t_min,

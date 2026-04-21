@@ -15,7 +15,13 @@ from .landscape_pipeline import (
     make_preferred_input_getter,
 )
 from .mlp_classification import SequenceMLPClassifier, SequenceMLPEnsembleClassifier
-from .core.trainer import TrainingJob, create_trainer, register_model, register_data
+from .core.trainer import (
+    TrainingJob,
+    create_trainer,
+    normalize_split_indices,
+    register_model,
+    register_data,
+)
 from .core.adaptor import (
     GraphTensorInputAdapter,
     LandscapeInputAdapter,
@@ -43,6 +49,15 @@ from .landscape_adapter import (
     records_from_landscape,
     datamodule_from_landscape,
 )
+from .landscape_regression import (
+    LandscapeRegressionConfig,
+    SplitIndices,
+    available_landscape_regression_runners,
+    discover_demo_csvs,
+    register_landscape_regression_runner,
+    run_landscape_regression,
+    run_landscape_regression_csv,
+)
 
 __all__ = [
     "create_trainer",
@@ -61,6 +76,7 @@ __all__ = [
     "TrainingJob",
     "register_model",
     "register_data",
+    "normalize_split_indices",
     "predict_sequences",
     "predict_landscape_records",
     "infer_fitness_layer_from_landscape",
@@ -80,4 +96,11 @@ __all__ = [
     "CSVConfigRequest",
     "records_from_landscape",
     "datamodule_from_landscape",
+    "LandscapeRegressionConfig",
+    "SplitIndices",
+    "available_landscape_regression_runners",
+    "discover_demo_csvs",
+    "register_landscape_regression_runner",
+    "run_landscape_regression",
+    "run_landscape_regression_csv",
 ]

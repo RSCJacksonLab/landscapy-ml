@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 import numpy as np
 import pytorch_lightning as pl
@@ -50,6 +50,124 @@ def _build_mask(
     return mask
 
 
+def _as_index_tensor(
+    indices: Sequence[int] | torch.Tensor | None,
+    *,
+    num_nodes: int,
+    name: str,
+) -> torch.Tensor | None:
+    if indices is None:
+        return None
+    tensor = torch.as_tensor(indices, dtype=torch.long).view(-1)
+    if tensor.numel() == 0:
+        return tensor
+    if bool((tensor < 0).any()) or bool((tensor >= num_nodes).any()):
+        raise ValueError(f"{name} contains node indices outside [0, {num_nodes}).")
+    return torch.unique(tensor, sorted=True)
+
+
+def _sample_without_replacement(
+    indices: torch.Tensor,
+    n: int,
+    *,
+    generator: torch.Generator,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if n <= 0 or indices.numel() == 0:
+        return indices.new_empty((0,), dtype=torch.long), indices
+    n = min(int(n), int(indices.numel()))
+    perm = torch.randperm(indices.numel(), generator=generator)
+    selected = indices[perm[:n]]
+    remaining = indices[perm[n:]]
+    return selected, remaining
+
+
+def _resolve_split_indices(
+    *,
+    num_nodes: int,
+    known_idx: torch.Tensor,
+    train_indices: Sequence[int] | torch.Tensor | None = None,
+    val_indices: Sequence[int] | torch.Tensor | None = None,
+    test_indices: Sequence[int] | torch.Tensor | None = None,
+    val_fraction: float = 0.0,
+    test_fraction: float = 0.0,
+    seed: Optional[int] = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    explicit_train = _as_index_tensor(
+        train_indices, num_nodes=num_nodes, name="train_indices"
+    )
+    explicit_val = _as_index_tensor(val_indices, num_nodes=num_nodes, name="val_indices")
+    explicit_test = _as_index_tensor(
+        test_indices, num_nodes=num_nodes, name="test_indices"
+    )
+
+    explicit = [idx for idx in (explicit_train, explicit_val, explicit_test) if idx is not None]
+    if explicit:
+        known_mask = _build_mask(num_nodes, known_idx)
+        for name, idx in (
+            ("train_indices", explicit_train),
+            ("val_indices", explicit_val),
+            ("test_indices", explicit_test),
+        ):
+            if idx is not None and idx.numel() and not bool(known_mask[idx].all()):
+                raise ValueError(f"{name} contains indices without finite target values.")
+
+        assigned = torch.zeros(num_nodes, dtype=torch.bool)
+        for name, idx in (
+            ("train_indices", explicit_train),
+            ("val_indices", explicit_val),
+            ("test_indices", explicit_test),
+        ):
+            if idx is None or idx.numel() == 0:
+                continue
+            if bool(assigned[idx].any()):
+                raise ValueError(f"{name} overlaps with another supplied split.")
+            assigned[idx] = True
+
+        remaining = known_idx[~assigned[known_idx]]
+        train_idx = explicit_train if explicit_train is not None else remaining
+        val_idx = explicit_val if explicit_val is not None else known_idx.new_empty((0,))
+        test_idx = explicit_test if explicit_test is not None else known_idx.new_empty((0,))
+
+        generator = torch.Generator()
+        if seed is not None:
+            generator.manual_seed(seed)
+
+        if explicit_val is None and val_fraction > 0:
+            n_val = int(round(float(val_fraction) * max(int(train_idx.numel()), 1)))
+            sampled, train_idx = _sample_without_replacement(
+                train_idx, n_val, generator=generator
+            )
+            val_idx = sampled
+        if explicit_test is None and test_fraction > 0:
+            n_test = int(round(float(test_fraction) * max(int(train_idx.numel()), 1)))
+            sampled, train_idx = _sample_without_replacement(
+                train_idx, n_test, generator=generator
+            )
+            test_idx = sampled
+
+        if train_idx.numel() <= 0:
+            raise ValueError("At least one finite target must be available for training.")
+        return train_idx, val_idx, test_idx
+
+    generator = torch.Generator()
+    if seed is not None:
+        generator.manual_seed(seed)
+    perm = torch.randperm(known_idx.numel(), generator=generator)
+    shuffled = known_idx[perm]
+
+    n_known = shuffled.numel()
+    n_test = int(round(float(test_fraction) * n_known))
+    n_val = int(round(float(val_fraction) * n_known))
+    n_train = n_known - n_val - n_test
+    if n_train <= 0:
+        raise ValueError("At least one known node must remain in the training mask.")
+
+    train_idx = shuffled[:n_train]
+    val_idx = shuffled[n_train : n_train + n_val]
+    test_idx = shuffled[n_train + n_val :]
+    return train_idx, val_idx, test_idx
+
+
 def _collate_single_graph(items: list[Any]) -> Any:
     return items[0]
 
@@ -62,14 +180,18 @@ def build_regression_graph_from_landscape(
     aggregate_func: Optional[Callable[..., Any]] = np.mean,
     val_fraction: float = 0.0,
     test_fraction: float = 0.0,
+    train_indices: Sequence[int] | torch.Tensor | None = None,
+    val_indices: Sequence[int] | torch.Tensor | None = None,
+    test_indices: Sequence[int] | torch.Tensor | None = None,
     seed: Optional[int] = None,
 ) -> Any:
     """
     Build a PyG-style single-graph regression object from a ``FitnessLandscape``.
 
     Known numeric fitness values are used as supervision targets; unknown values
-    should be encoded as ``NaN`` in the source layer and will be excluded from
-    the training masks automatically.
+    should be encoded as ``NaN`` in the source layer. Pre-defined
+    train/validation/test indices can be supplied; otherwise finite targets are
+    randomly split using ``val_fraction`` and ``test_fraction``.
     """
 
     if not hasattr(landscape, "to_graph_tensor"):
@@ -96,24 +218,17 @@ def build_regression_graph_from_landscape(
     if known_idx.numel() == 0:
         raise ValueError("No known numeric fitness values were found for training.")
 
-    generator = torch.Generator()
-    if seed is not None:
-        generator.manual_seed(seed)
-    perm = torch.randperm(known_idx.numel(), generator=generator)
-    known_idx = known_idx[perm]
-
-    n_known = known_idx.numel()
-    n_test = int(round(float(test_fraction) * n_known))
-    n_val = int(round(float(val_fraction) * n_known))
-    n_train = n_known - n_val - n_test
-    if n_train <= 0:
-        raise ValueError("At least one known node must remain in the training mask.")
-
-    train_idx = known_idx[:n_train]
-    val_idx = known_idx[n_train : n_train + n_val]
-    test_idx = known_idx[n_train + n_val :]
-
     num_nodes = y.shape[0]
+    train_idx, val_idx, test_idx = _resolve_split_indices(
+        num_nodes=num_nodes,
+        known_idx=known_idx,
+        train_indices=train_indices,
+        val_indices=val_indices,
+        test_indices=test_indices,
+        val_fraction=val_fraction,
+        test_fraction=test_fraction,
+        seed=seed,
+    )
     graph.y = y
     graph.target_layer = target_layer
     graph.known_mask = _build_mask(num_nodes, known_idx)
@@ -170,6 +285,9 @@ class LandscapeGraphRegressionDataModule(pl.LightningDataModule):
         aggregate_func: Optional[Callable[..., Any]] = np.mean,
         val_fraction: float = 0.0,
         test_fraction: float = 0.0,
+        train_indices: Sequence[int] | torch.Tensor | None = None,
+        val_indices: Sequence[int] | torch.Tensor | None = None,
+        test_indices: Sequence[int] | torch.Tensor | None = None,
         seed: Optional[int] = None,
         num_workers: int = 0,
         pin_memory: bool = False,
@@ -181,6 +299,9 @@ class LandscapeGraphRegressionDataModule(pl.LightningDataModule):
             aggregate_func=aggregate_func,
             val_fraction=val_fraction,
             test_fraction=test_fraction,
+            train_indices=train_indices,
+            val_indices=val_indices,
+            test_indices=test_indices,
             seed=seed,
         )
         return cls(

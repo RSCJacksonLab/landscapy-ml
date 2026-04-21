@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
+import inspect
 import importlib
 import json
 from pathlib import Path
@@ -20,6 +21,19 @@ ModelFactory = Callable[..., pl.LightningModule]
 DataFactory = Callable[..., pl.LightningDataModule]
 TrainerFactory = Callable[..., pl.Trainer]
 
+_SPLIT_INDEX_ALIASES: dict[str, str] = {
+    "train": "train_indices",
+    "training": "train_indices",
+    "train_indices": "train_indices",
+    "val": "val_indices",
+    "valid": "val_indices",
+    "validation": "val_indices",
+    "val_indices": "val_indices",
+    "validation_indices": "val_indices",
+    "test": "test_indices",
+    "test_indices": "test_indices",
+}
+
 
 @dataclass(frozen=True)
 class ModelRegistryEntry:
@@ -29,6 +43,46 @@ class ModelRegistryEntry:
 
 _MODEL_REGISTRY: Dict[str, ModelRegistryEntry] = {}
 _DATA_REGISTRY: Dict[str, DataFactory] = {}
+
+
+def normalize_split_indices(
+    split_indices: Mapping[str, Sequence[int]] | None,
+) -> dict[str, list[int]]:
+    """
+    Normalize common split names to data-builder keyword arguments.
+
+    Missing splits are intentionally allowed; data builders can decide whether
+    to leave them empty or fall back to random splitting.
+    """
+
+    if split_indices is None:
+        return {}
+
+    normalized: dict[str, list[int]] = {}
+    for raw_name, values in split_indices.items():
+        key = _SPLIT_INDEX_ALIASES.get(str(raw_name).lower())
+        if key is None:
+            valid = ", ".join(sorted(_SPLIT_INDEX_ALIASES))
+            raise ValueError(
+                f"Unknown split name {raw_name!r}. Expected one of: {valid}."
+            )
+        if values is None:
+            continue
+        if key in normalized:
+            raise ValueError(f"Split indices for {key!r} were supplied more than once.")
+        normalized[key] = [int(idx) for idx in values]
+    return normalized
+
+
+def _factory_accepts_kwargs(factory: Callable[..., Any], names: Sequence[str]) -> bool:
+    try:
+        signature = inspect.signature(factory)
+    except (TypeError, ValueError):
+        return False
+    params = signature.parameters
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()):
+        return True
+    return all(name in params for name in names)
 
 
 def register_model(
@@ -270,6 +324,9 @@ class TrainingJob:
         Keyword arguments forwarded to the model factory.
     data_kwargs : dict[str, Any], optional
         Keyword arguments forwarded to the data builder.
+    split_indices : mapping[str, sequence[int]], optional
+        Optional pre-defined train/validation/test indices. Missing splits are
+        allowed and are delegated to the data builder fallback behavior.
     trainer_kwargs : dict[str, Any], optional
         Keyword arguments forwarded to the trainer factory.
     seed : int, optional
@@ -282,6 +339,7 @@ class TrainingJob:
     data_name: str
     model_kwargs: Dict[str, Any] = field(default_factory=dict)
     data_kwargs: Dict[str, Any] = field(default_factory=dict)
+    split_indices: Optional[Mapping[str, Sequence[int]]] = None
     trainer_kwargs: Dict[str, Any] = field(default_factory=dict)
     seed: Optional[int] = None
     trainer_factory: TrainerFactory = create_trainer
@@ -300,7 +358,24 @@ class TrainingJob:
 
     def _build_datamodule(self) -> pl.LightningDataModule:
         factory = _DATA_REGISTRY[self.data_name]
-        dm = factory(**self.data_kwargs)
+        data_kwargs = dict(self.data_kwargs)
+        normalized_splits = normalize_split_indices(self.split_indices)
+        if normalized_splits:
+            if not _factory_accepts_kwargs(factory, tuple(normalized_splits)):
+                accepted = ", ".join(sorted(normalized_splits))
+                raise ValueError(
+                    f"Data builder '{self.data_name}' does not accept pre-defined "
+                    f"split indices ({accepted}). Choose a split-aware data builder "
+                    "or omit split_indices."
+                )
+            overlap = sorted(set(data_kwargs).intersection(normalized_splits))
+            if overlap:
+                joined = ", ".join(overlap)
+                raise ValueError(
+                    f"Split indices were supplied both in data_kwargs and split_indices: {joined}."
+                )
+            data_kwargs.update(normalized_splits)
+        dm = factory(**data_kwargs)
         # Ensure datasets are built before we inspect shapes or hand to Trainer.
         try:
             dm.setup("fit")
