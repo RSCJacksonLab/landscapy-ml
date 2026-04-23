@@ -16,7 +16,7 @@ from .adaptor import (
     resolve_model_adapter,
     resolve_output_adapter,
 )
-from ..data import embed_sequences
+from .data_utils import embed_sequences
 
 try:
     from fitness_landscape.core.fitness import BaseFitnessLayer

@@ -1,115 +1,38 @@
-# Models, trainers, and jobs
+# Models And Training
 
-## Model implementations
-- `SequenceMLPClassifier` (`mlp_classification.py`): Example single MLP classifier for embeddings.
-  - Key args: `num_features`, `num_classes`, `hidden_sizes`, `dropout`, optimizer hyperparameters.
-- `SequenceMLPEnsembleClassifier` (`mlp_classification.py`): Example deep ensemble of MLP classifiers for uncertainty estimation.
-  - Key args: same as single MLP plus `num_models`; `predict_with_uncertainty` aggregates mean/variance across ensemble members.
-- `GraphAttentionFitnessRegressor` (`examples/gat_fitness.py`): Example graph attention network for semi-supervised node regression over a landscape graph.
-  - Key args: `in_channels` or `num_features`, `hidden_channels`, `num_layers`, `heads`, `dropout`, optimizer hyperparameters.
-  - Requires `torch-geometric`.
-- `DiffusionPriorExactGP` (`examples/gp_fitness.py`): Example exact GP regressor using a precomputed landscape diffusion covariance over node indices.
-  - Key args: `train_x`, `train_y`, `covariance_matrix`, `mean_mode`, `jitter`.
-  - Requires `gpytorch`.
-  - Intended as a transductive graph-imputation example on a fixed landscape rather than a general sequence-to-fitness model.
+## Maintained Example Models
+- `GraphAttentionFitnessRegressor` (`examples/gat_fitness.py`): Lightning graph attention regressor for semi-supervised node fitness prediction. Requires `torch-geometric`.
+- `DiffusionPriorExactGP` (`examples/gp_fitness.py`): exact GP regressor over a fixed landscape graph using a diffusion covariance. Requires `gpytorch`.
 
-## Trainer factory
-- `create_trainer(...)` in `core/trainer.py` builds a `pytorch_lightning.Trainer` with:
-  - TensorBoard logging to `log_dir/experiment_name`.
-  - Optional W&B logging (when `use_wandb` true and `wandb` available) configured via `wandb_project`, `wandb_entity`, `wandb_run_name`, `wandb_tags`, `wandb_dir`.
-  - Checkpointing callback controlled by `checkpoint_dir`, `checkpoint_monitor`, `checkpoint_mode`, `checkpoint_every_n_epochs`, `save_top_k`.
-  - Other knobs: `max_epochs`, `accelerator`, `devices`, `log_every_n_steps`, `num_sanity_val_steps`.
+## Registry
+`core/model_registry.py` maps names to factories.
 
-## Registries
-`core/trainer.py` maintains registries that map string keys to factories:
-- Models: `sequence_mlp_classifier`, `sequence_mlp_ensemble`, `external`.
-- Data builders: `landscape_records`, `fitness_landscape_records`, `raw_sequences` (`SequenceClassificationDataModule.from_sequences`), `fitness_landscape`.
-Use `register_model(name, factory, overwrite=False, requires_num_features=True)` or `register_data(name, factory, overwrite=False)` to extend the set of available components. Set `requires_num_features=False` for models that should not auto-infer feature dimensions. Factories must accept the kwargs passed via Hydra or `TrainingJob`. Example:
-```python
-from landscapyml import register_model, register_data
-from landscapyml.core.trainer import TrainingJob
+Built-in entries:
+- Models: `external`
+- Data builders: `landscape_records`, `landscape_graph_regression`
 
-# Register a new model factory
-def build_custom_model(num_features: int, num_classes: int, **kwargs):
-    return MyLightningModule(num_features=num_features, num_classes=num_classes, **kwargs)
+Importing `landscapyml.examples.gat_fitness` registers:
+- `graph_attention_regressor`
 
-register_model("custom_model", build_custom_model)
+The diffusion-prior GP is registered as a landscape runner, because it is not a
+Lightning training job.
 
-# Register a custom data builder
-def build_custom_data(train_data, label_key, **kwargs):
-    return MyDataModule(train_data=train_data, label_key=label_key, **kwargs)
+## TrainingJob
+`TrainingJob` wires a registered model, registered data builder, and Lightning
+trainer:
 
-register_data("custom_data", build_custom_data)
-
-job = TrainingJob(
-    model_name="custom_model",
-    data_name="custom_data",
-    model_kwargs={"num_classes": 3},
-    data_kwargs={"train_data": records, "label_key": "label"},
-    trainer_kwargs={"max_epochs": 10},
-)
-trainer, model, dm = job.run()
-```
-
-Importing `landscapyml.examples.gat_fitness` also self-registers:
-- model: `graph_attention_regressor`
-- data builder: `landscape_graph_regression`
-
-Those example registry entries are intended for node-regression workflows where
-the supervision target is a numeric fitness layer on a single `FitnessLandscape`
-graph.
-
-Importing `landscapyml.examples.gp_fitness` self-registers:
-- input adapter: `landscape_node_index`
-
-That adapter lets graph-imputation models consume a `FitnessLandscape` as a
-sequence of node indices for inference-time attachment through
-`infer_fitness_layer_from_landscape(...)`.
-
-## External models
-The `external` model entry instantiates a LightningModule by class path and optional adapter:
 ```python
 from landscapyml import TrainingJob
+from landscapyml.examples import gat_fitness  # register example model
 
 job = TrainingJob(
-    model_name="external",
-    data_name="fitness_landscape_records",
-    model_kwargs={
-        "class_path": "mypkg.models.MyLightningModule",
-        "init_kwargs": {"num_classes": 3},
-    },
-    data_kwargs={"train_data": records, "label_key": "label"},
-    trainer_kwargs={"max_epochs": 10},
+    model_name="graph_attention_regressor",
+    data_name="landscape_graph_regression",
+    data_kwargs={"landscape": landscape, "target_layer": "fitness"},
+    trainer_kwargs={"max_epochs": 50, "use_wandb": False},
 )
 trainer, model, dm = job.run()
 ```
-If the external class is not a LightningModule, supply an adapter via `model_kwargs.adapter_path` that wraps the model into a LightningModule.
 
-## TrainingJob workflow
-`TrainingJob` (dataclass in `trainer.py`) coordinates building the data module, model, and trainer from provided kwargs and registry keys.
-- Performs validation that chosen `model_name` and `data_name` exist in the registries.
-- Builds the DataModule and calls `.setup()` before inferring `num_features` from the train loader if not supplied.
-- Instantiates the model with `model_kwargs`, trainer with `trainer_factory` (defaults to `create_trainer`), seeds via `pytorch_lightning.seed_everything` when `seed` is set.
-- Logs run metadata (label mapping, counts, registry keys) to all configured loggers.
-- Writes `label_mapping.json` next to checkpoints when available.
-- `run(fit=True, test=False)` will execute `.fit()` and optionally `.test()` on the assembled components.
-
-Typical programmatic training flow:
-```python
-from landscapyml import TrainingJob
-
-job = TrainingJob(
-    model_name="sequence_mlp_classifier",
-    data_name="raw_sequences",
-    model_kwargs={"num_classes": 3},
-    data_kwargs={
-        "train_sequences": sequences,
-        "train_labels": labels,
-        "label_key": "family",
-        "embedding_mode": "hard",
-    },
-    trainer_kwargs={"max_epochs": 5},
-    seed=0,
-)
-trainer, model, dm = job.run()
-```
+Use `register_model(...)` and `register_data(...)` for project-specific
+Lightning models and data modules.

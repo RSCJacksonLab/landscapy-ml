@@ -9,7 +9,6 @@ from landscapyml.core.inference import (
     register_layer_adapter,
     register_model_layer_mapping,
 )
-from landscapyml.mlp_classification import SequenceMLPEnsembleClassifier
 
 
 class DummyLandscape:
@@ -26,6 +25,22 @@ class DummyLandscape:
         self._attached = layer
 
 
+class DummyProbModel(torch.nn.Module):
+    def __init__(self, num_classes: int):
+        super().__init__()
+        self.num_classes = num_classes
+        self.device = torch.device("cpu")
+
+    def predict_with_uncertainty(self, x):
+        mean = torch.full(
+            (x.shape[0], self.num_classes),
+            1.0 / self.num_classes,
+            device=x.device,
+        )
+        var = torch.zeros_like(mean)
+        return mean, var
+
+
 def test_predict_sequences_uses_stubbed_embeddings(monkeypatch):
     # Stub embed_sequences to bypass heavy dependencies
     fake_embeddings = torch.randn(2, 3)
@@ -33,14 +48,14 @@ def test_predict_sequences_uses_stubbed_embeddings(monkeypatch):
         "landscapyml.core.inference.embed_sequences",
         lambda *args, **kwargs: (fake_embeddings, None, None),
     )
-    model = SequenceMLPEnsembleClassifier(num_features=3, num_classes=2, num_models=2)
+    model = DummyProbModel(num_classes=2)
     mean, var = predict_sequences(model, sequences=["AAA", "BBB"], model_name="ignored")
     assert mean.shape == (2, 2)
     assert var.shape == (2, 2)
 
 
 def test_predict_landscape_records():
-    model = SequenceMLPEnsembleClassifier(num_features=2, num_classes=2, num_models=2)
+    model = DummyProbModel(num_classes=2)
     records = [
         {"embedding": torch.tensor([1.0, 0.0]), "fitness_tensors": {"label": 0}},
         {"embedding": torch.tensor([0.0, 1.0]), "fitness_tensors": {"label": 1}},
@@ -65,7 +80,8 @@ def test_infer_fitness_layer_from_landscape_with_stub(monkeypatch):
 
     embeddings = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float)
     landscape = DummyLandscape(embeddings)
-    model = SequenceMLPEnsembleClassifier(num_features=2, num_classes=2, num_models=2)
+    model = DummyProbModel(num_classes=2)
+    register_model_layer_mapping(DummyProbModel, "prob_categorical", overwrite=True)
 
     layer = infer_fitness_layer_from_landscape(
         landscape,

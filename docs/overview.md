@@ -6,21 +6,18 @@ small, composable helpers for exporting landscapes into records, wiring those
 records into datasets and Lightning datamodules, and adapting model outputs
 back into landscape fitness layers.
 
-Sequence classifiers and model-specific integrations are examples built on top
-of that core rather than the primary abstraction.
+Model-specific integrations are examples built on top of that core rather than
+the primary abstraction.
 
 ## Package layout
-- `landscapyml.landscape_pipeline`: Generic record export, dataset, and DataModule utilities for landscape-driven pipelines.
-- `landscapyml.config.JobConfig`: Hydra-validated configuration schema for training jobs.
-- `landscapyml.data`: Embedding helpers, dataset and Lightning `DataModule` definitions.
-- `landscapyml.data_utils`: Convenience builders for creating configs from data frames or CSVs.
-- `landscapyml.mlp_classification`: Example MLP classifiers (single model and deep ensemble) for embeddings.
-- `landscapyml.core.trainer`: Trainer factory (`create_trainer`) and registries for models/data builders (`TrainingJob`).
-- `landscapyml.hydra_runner`: Programmatic Hydra entry point that wires configs to `TrainingJob`.
-- `landscapyml.core.inference`: Inference helpers for raw sequences, FitnessLandscape exports, and landscape layers.
-- `landscapyml.core.adaptor`: Adapter ABCs and registries for mapping landscapes to models and predictions back to layers.
-- `landscapyml.examples`: Optional model-specific examples such as the Boltz-2 adapter, the GAT-based fitness regressor, and the diffusion-prior GP regressor.
+- `landscapyml.core.data`: Base landscape record datasets/data modules plus the graph-regression data path used by the demos.
+- `landscapyml.core.data_utils`: Record normalization, target/input getters, sequence embedding helpers, split helpers, and variable-length-safe sequence features.
+- `landscapyml.core.adaptor`: The landscapy <-> PyTorch format boundary: landscape record export, input adapters, model adapters, and output-layer adapters.
+- `landscapyml.core.model_registry`: Functional model/data registration. This is what the CLI and `TrainingJob` use to resolve model and data names.
+- `landscapyml.core.trainer`: Trainer construction and `TrainingJob`; it consumes the registry but does not own it.
+- `landscapyml.core.inference`: Trained model -> `FitnessLandscape` mapping, including attaching predicted fitness layers.
+- `landscapyml.examples`: Optional model-specific examples for the maintained GAT and diffusion-prior GP demo paths.
 - `landscapyml.logging_utils`: Lightweight logging configuration aligned with landscapy.
 - `landscapyml.__main__`: CLI entry point (`python -m landscapyml`).
 
-Use the CLI for Hydra-driven training, or import the Python APIs for programmatic training/inference. Other docs in this folder dive into specific topics.
+Use the CLI for demo training, or import the Python APIs for programmatic training/inference. Other docs in this folder dive into specific topics.

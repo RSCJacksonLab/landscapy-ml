@@ -5,6 +5,7 @@ import numpy as np
 import torch
 
 from landscapyml.core.adaptor import GraphTensorInputAdapter, resolve_input_adapter
+from landscapyml.core.data import build_regression_graph_from_landscape
 
 
 class FakeGATConv(torch.nn.Module):
@@ -42,7 +43,16 @@ class DummyGraph:
     def to(self, device):
         self.x = self.x.to(device)
         self.edge_index = self.edge_index.to(device)
-        for name in ("y", "known_mask", "train_mask", "val_mask", "test_mask", "predict_mask"):
+        for name in (
+            "y",
+            "known_mask",
+            "train_mask",
+            "val_mask",
+            "test_mask",
+            "predict_mask",
+            "feature_normalization_mean",
+            "feature_normalization_scale",
+        ):
             value = getattr(self, name, None)
             if torch.is_tensor(value):
                 setattr(self, name, value.to(device))
@@ -58,9 +68,11 @@ class DummyLandscape:
 
 
 def test_build_regression_graph_from_landscape(monkeypatch):
-    monkeypatch.setitem(sys.modules, "torch_geometric.nn", types.SimpleNamespace(GATConv=FakeGATConv))
-
-    from landscapyml.examples.gat_fitness import build_regression_graph_from_landscape
+    monkeypatch.setitem(
+        sys.modules,
+        "torch_geometric.nn",
+        types.SimpleNamespace(GATConv=FakeGATConv),
+    )
 
     graph = build_regression_graph_from_landscape(
         DummyLandscape(),
@@ -75,8 +87,48 @@ def test_build_regression_graph_from_landscape(monkeypatch):
     assert graph.train_mask.tolist() == [True, False, True]
 
 
+def test_build_regression_graph_adds_training_feature_normalization(monkeypatch):
+    monkeypatch.setitem(
+        sys.modules,
+        "torch_geometric.nn",
+        types.SimpleNamespace(GATConv=FakeGATConv),
+    )
+
+    from landscapyml.examples.gat_fitness import (
+        GraphAttentionFitnessRegressor,
+    )
+
+    graph = build_regression_graph_from_landscape(
+        DummyLandscape(),
+        target_layer="score",
+        normalize_features=True,
+        seed=0,
+    )
+
+    assert graph.normalize_features is True
+    assert torch.allclose(graph.feature_normalization_mean, torch.tensor([1.0, 0.5]))
+    assert torch.allclose(graph.feature_normalization_scale, torch.tensor([1.0, 0.5]))
+
+    model = GraphAttentionFitnessRegressor(num_features=2, hidden_channels=4, num_layers=1)
+    normalized = model._normalize_features(graph)
+    assert torch.allclose(
+        normalized,
+        torch.tensor(
+            [
+                [0.0, -1.0],
+                [-1.0, 1.0],
+                [0.0, 1.0],
+            ]
+        ),
+    )
+
+
 def test_graph_attention_regressor_forward(monkeypatch):
-    monkeypatch.setitem(sys.modules, "torch_geometric.nn", types.SimpleNamespace(GATConv=FakeGATConv))
+    monkeypatch.setitem(
+        sys.modules,
+        "torch_geometric.nn",
+        types.SimpleNamespace(GATConv=FakeGATConv),
+    )
 
     from landscapyml.examples.gat_fitness import GraphAttentionFitnessRegressor
 
@@ -87,7 +139,11 @@ def test_graph_attention_regressor_forward(monkeypatch):
 
 
 def test_graph_example_registers_core_graph_adapter_alias(monkeypatch):
-    monkeypatch.setitem(sys.modules, "torch_geometric.nn", types.SimpleNamespace(GATConv=FakeGATConv))
+    monkeypatch.setitem(
+        sys.modules,
+        "torch_geometric.nn",
+        types.SimpleNamespace(GATConv=FakeGATConv),
+    )
 
     __import__("landscapyml.examples.gat_fitness")
     adapter = resolve_input_adapter("landscape_graph")

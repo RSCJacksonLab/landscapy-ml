@@ -26,14 +26,12 @@ setup(
     ],
     package_dir={"": "src"},
     packages=find_packages(where="src"),
-    package_data={"landscapyml": ["conf/*.yaml"]},
     python_requires=">=3.10",
     install_requires=[
         # landscapy is optional here to avoid resolver conflicts when the base
         # package already exists in editable form. Use the "isolated" extra to
         # pull landscapy automatically when needed.
         "click>=8.1",
-        "hydra-core>=1.3",
         "torch>=2.2",
         "pytorch-lightning>=2.3",
         "numpy>=1.24",
