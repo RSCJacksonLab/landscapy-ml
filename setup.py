@@ -35,8 +35,9 @@ setup(
         "torch>=2.2",
         "pytorch-lightning>=2.3",
         "numpy>=1.24",
+        "pandas>=2.0",
         "scipy>=1.10",
-        "tensorboard>=2.20"
+        "tensorboard>=2.20",
     ],
     extras_require={
         "dev": [
@@ -51,6 +52,7 @@ setup(
         "graph": ["torch-geometric"],
         "gp": ["gpytorch"],
         "examples": ["torch-geometric", "gpytorch"],
+        "tuning": ["ray[tune]>=2.9", "pyarrow>=14", "tensorboardX>=2.6"],
         "tracking": ["wandb>=0.16"],
         "isolated": [
             # When installing stand-alone, pull landscapy from the dev branch.
