@@ -115,6 +115,7 @@ def test_build_diffusion_gp_artifacts_drops_masked_nodes_for_t_map(monkeypatch):
         DummyLandscape(),
         target_layer="score",
         mask_tokens=("X",),
+        normalize_features=True,
     )
 
     assert called["n_sequences"] == 2
@@ -123,6 +124,12 @@ def test_build_diffusion_gp_artifacts_drops_masked_nodes_for_t_map(monkeypatch):
     assert artifacts.train_indices.tolist() == [0, 1, 2]
     assert artifacts.predict_mask.tolist() == [False, False, False, True]
     assert artifacts.covariance_matrix.shape == (4, 4)
+    assert artifacts.normalize_features is True
+    assert artifacts.feature_normalization_mean == 1.0
+    assert np.isclose(
+        artifacts.feature_normalization_scale,
+        np.std(np.asarray([0.0, 1.0, 2.0]), ddof=0),
+    )
 
 
 def _install_fake_gpytorch(monkeypatch):
@@ -200,9 +207,16 @@ def test_diffusion_prior_gp_predict_and_fit(monkeypatch):
         train_x=torch.tensor([[0.0], [2.0]]),
         train_y=torch.tensor([1.0, 2.0]),
         covariance_matrix=covariance,
+        normalize_features=True,
+        feature_normalization_mean=1.0,
+        feature_normalization_scale=1.0,
     )
     preds = model.predict(torch.tensor([[0.0], [1.0], [2.0]]))
     assert preds.shape == (3,)
+    assert torch.equal(
+        model.covar_module._to_index_tensor(torch.tensor([[-1.0], [0.0], [1.0]])),
+        torch.tensor([0, 1, 2]),
+    )
 
     fake_artifacts = module.DiffusionGPArtifacts(
         covariance_matrix=covariance,
@@ -217,6 +231,9 @@ def test_diffusion_prior_gp_predict_and_fit(monkeypatch):
         t_map=1.5,
         signal_variance=0.5,
         mask_tokens=("X",),
+        normalize_features=True,
+        feature_normalization_mean=1.0,
+        feature_normalization_scale=1.0,
     )
 
     monkeypatch.setattr(
@@ -232,6 +249,7 @@ def test_diffusion_prior_gp_predict_and_fit(monkeypatch):
     )
     assert len(result.losses) == 2
     assert result.artifacts.t_map == 1.5
+    assert result.model.normalize_features is True
 
 
 def test_gp_example_registers_core_node_index_adapter_alias(monkeypatch):

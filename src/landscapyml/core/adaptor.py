@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
@@ -16,6 +17,8 @@ from typing import (
 
 import torch
 from torch.utils.data import DataLoader, TensorDataset
+
+from .data_utils import LandscapeRecord
 
 try:
     from fitness_landscape.core.fitness import NumericFitness, ProbabilisticCategoricalFitness
@@ -168,6 +171,109 @@ def normalize_adapter_outputs(
     raise ValueError("Model adapter returned unsupported outputs.")
 
 
+def _extract_label_mapping(layer: Any) -> Optional[list[str]]:
+    cats = getattr(layer, "categories", None)
+    if cats is None:
+        meta = getattr(layer, "metadata", None)
+        if isinstance(meta, Mapping):
+            cats = meta.get("categories")
+    if cats is None:
+        return None
+    return list(cats)
+
+
+@dataclass(frozen=True)
+class LandscapeExport:
+    records: list[LandscapeRecord]
+    fitness_mappings: dict[str, Optional[list[str]]]
+
+
+def _copy_record_views(record: Mapping[str, Any]) -> LandscapeRecord:
+    copied: LandscapeRecord = {
+        "sequence_tensor": record.get("sequence_tensor"),
+        "fitness_tensors": dict(record.get("fitness_tensors") or {}),
+    }
+    if "embedding" in record:
+        copied["embedding"] = record["embedding"]
+    if "attention_mask" in record:
+        copied["attention_mask"] = record["attention_mask"]
+    return copied
+
+
+def export_landscape_records(
+    landscape: Any,
+    *,
+    fitness_layers: Optional[Sequence[str]] = None,
+    rename_fitness: Optional[Mapping[str, str]] = None,
+    feature_view: str = "auto",
+    include_embeddings: bool = True,
+    tokenizer: Any | str | None = None,
+    sequence_idx: Optional[Sequence[int]] = None,
+    sequence: Optional[Sequence[str] | str] = None,
+) -> LandscapeExport:
+    """
+    Export a ``FitnessLandscape`` into task-agnostic ML record dictionaries.
+    """
+
+    if not hasattr(landscape, "to_sequence_tensors"):
+        raise ValueError("Landscape must implement to_sequence_tensors.")
+
+    raw = landscape.to_sequence_tensors(
+        sequence_idx=sequence_idx,
+        sequence=sequence,
+        tokenizer=tokenizer,
+        feature_view=feature_view,
+        include_embeddings=include_embeddings,
+        as_batch=False,
+    )
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
+        raise ValueError("to_sequence_tensors must return a sequence of record mappings.")
+
+    requested_layers = list(fitness_layers) if fitness_layers is not None else None
+    rename_map = dict(rename_fitness or {})
+
+    records: list[LandscapeRecord] = []
+    selected_layer_names: list[str] | None = requested_layers
+
+    for rec in raw:
+        if not isinstance(rec, Mapping):
+            raise ValueError("Landscape export must yield mapping records.")
+
+        fitness = rec.get("fitness_tensors")
+        if not isinstance(fitness, Mapping):
+            raise ValueError("Landscape export records must contain a fitness_tensors mapping.")
+
+        if selected_layer_names is None:
+            selected_layer_names = list(fitness.keys())
+
+        missing = [name for name in selected_layer_names if name not in fitness]
+        if missing:
+            missing_list = ", ".join(missing)
+            raise ValueError(
+                f"Requested fitness layer(s) missing from landscape export: {missing_list}."
+            )
+
+        new_rec = _copy_record_views(rec)
+        new_rec["fitness_tensors"] = {
+            rename_map.get(name, name): fitness[name] for name in selected_layer_names
+        }
+        records.append(new_rec)
+
+    if selected_layer_names is None:
+        selected_layer_names = []
+
+    available_layers = getattr(landscape, "fitness_layers", None)
+    fitness_mappings: dict[str, Optional[list[str]]] = {}
+    for layer_name in selected_layer_names:
+        exported_name = rename_map.get(layer_name, layer_name)
+        mapping = None
+        if isinstance(available_layers, Mapping):
+            mapping = _extract_label_mapping(available_layers.get(layer_name))
+        fitness_mappings[exported_name] = mapping
+
+    return LandscapeExport(records=records, fitness_mappings=fitness_mappings)
+
+
 class LandscapeInputAdapter(ABC):
     name: str = "input_adapter"
 
@@ -292,9 +398,19 @@ class GraphTensorInputAdapter(LandscapeInputAdapter):
         device: Optional[torch.device] = None,  # noqa: ARG002
         **kwargs: Any,  # noqa: ARG002
     ) -> Iterable[Any]:
-        if not hasattr(landscape, "to_graph_tensor"):
+        if hasattr(landscape, "to_graph_tensor"):
+            try:
+                yield landscape.to_graph_tensor(tokenizer=self.tokenizer)
+                return
+            except ValueError as exc:
+                if "inhomogeneous shape" not in str(exc):
+                    raise
+        if not hasattr(landscape, "graph"):
             raise RuntimeError("Landscape does not implement to_graph_tensor().")
-        yield landscape.to_graph_tensor(tokenizer=self.tokenizer)
+
+        from .data import _graph_tensor_from_landscape_graph
+
+        yield _graph_tensor_from_landscape_graph(landscape)
 
     def to_model_inputs(
         self, batch: Any, *, device: Optional[torch.device] = None

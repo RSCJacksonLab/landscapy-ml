@@ -4,9 +4,14 @@ import types
 import pytest
 import torch
 
-from landscapyml.data import (
-    SequenceClassificationDataModule,
-    SequenceClassificationDataset,
+from landscapyml.core.data import (
+    LandscapeDataModule,
+    LandscapeDataset,
+    LandscapeGraphDataset,
+    LandscapeGraphRegressionDataModule,
+    build_regression_graph_from_landscape,
+)
+from landscapyml.core.data_utils import (
     _pad_tokens,
     embed_sequences,
     embed_sequences_to_records,
@@ -116,32 +121,22 @@ def test_embed_sequences_to_records_creates_expected_fields():
         assert "embedding" in rec
 
 
-def test_sequence_classification_dataset_with_embeddings():
-    records = [
-        {"embedding": torch.tensor([1.0, 2.0]), "fitness_tensors": {"lab": 1}},
-        {
-            "embedding": torch.tensor([3.0, 4.0]),
-            "fitness_tensors": {"lab": torch.tensor([0, 1])},
-        },
-    ]
-    ds = SequenceClassificationDataset(records, label_key="lab")
-    feats, label = ds[1]
-    assert torch.allclose(feats, torch.tensor([3.0, 4.0]))
-    assert label.item() == 1  # multi-hot argmaxed
+def test_landscape_data_specializations_share_core_abstractions():
+    assert issubclass(LandscapeGraphDataset, LandscapeDataset)
+    assert issubclass(LandscapeGraphRegressionDataModule, LandscapeDataModule)
 
 
-def test_datamodule_splits_train_val():
+def test_generic_datamodule_splits_train_val():
     records = [
         {"sequence_tensor": torch.tensor([1.0, 0.0]), "fitness_tensors": {"label": 0}},
         {"sequence_tensor": torch.tensor([0.0, 1.0]), "fitness_tensors": {"label": 1}},
         {"sequence_tensor": torch.tensor([1.0, 1.0]), "fitness_tensors": {"label": 0}},
     ]
-    dm = SequenceClassificationDataModule(
+    dm = LandscapeDataModule(
         train_data=records,
         val_data=None,
         test_data=None,
         predict_data=None,
-        label_key="label",
         batch_size=2,
         val_split=0.34,
         val_seed=42,
@@ -152,18 +147,44 @@ def test_datamodule_splits_train_val():
     assert len(train_loader.dataset) + len(val_loader.dataset) == len(records)
 
 
-def test_datamodule_from_sequences(monkeypatch):
-    dm = SequenceClassificationDataModule.from_sequences(
-        train_sequences=["AAA", "BBB"],
-        train_labels=[0, 1],
-        label_key="label",
-        model_name="stub",
-        embedding_mode="hard",
-        batch_size=2,
-        shuffle=False,
+def test_graph_regression_falls_back_for_variable_length_sequences():
+    import networkx as nx
+    import numpy as np
+
+    class DummySequence:
+        def __init__(self, value):
+            self.value = value
+
+        def to_array(self):
+            return np.asarray(list(self.value), dtype=object)
+
+    class DummyLayer:
+        dtype = "numeric"
+
+        def to_scalar(self, aggregate_func=np.mean):  # noqa: ARG002
+            return np.asarray([1.0, np.nan, 3.0], dtype=float)
+
+    class DummyLandscape:
+        def __init__(self):
+            self.sequences = [
+                DummySequence("AA"),
+                DummySequence("AAA"),
+                DummySequence("AB"),
+            ]
+            self.graph = nx.path_graph(3)
+            for idx, sequence in enumerate(self.sequences):
+                self.graph.nodes[idx]["sequence"] = sequence
+            self._node_order = list(self.graph.nodes())
+            self.fitness_layers = {"score": DummyLayer()}
+
+        def to_graph_tensor(self, tokenizer=None):  # noqa: ARG002
+            raise ValueError("inhomogeneous shape after 1 dimensions")
+
+    graph = build_regression_graph_from_landscape(
+        DummyLandscape(),
+        target_layer="score",
     )
-    dm.setup("fit")
-    loader = dm.train_dataloader()
-    x, y = next(iter(loader))
-    assert x.shape[0] == 2
-    assert set(y.tolist()) == {0, 1}
+    assert graph.x.shape[0] == 3
+    assert graph.edge_index.shape[0] == 2
+    assert graph.known_mask.tolist() == [True, False, True]
+    assert graph.predict_mask.tolist() == [False, True, False]

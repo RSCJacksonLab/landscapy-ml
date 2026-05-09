@@ -1,11 +1,11 @@
 # Inference and landscape integration
 
-Inference helpers live in `landscapyml.core.inference` (re-exported in `landscapyml.inference`) and operate on trained models plus either raw sequences, FitnessLandscape records, or existing embeddings. Adapter ABCs and registries live in `landscapyml.core.adaptor` (re-exported in `landscapyml.adapters`).
+Inference helpers live in `landscapyml.core.inference` and operate on trained models plus either raw sequences, FitnessLandscape records, or existing embeddings. Adapter ABCs and registries live in `landscapyml.core.adaptor`.
 
 ## Direct sequence predictions
 - `predict_sequences(model, sequences, *, embedding_mode="hard", model_name="facebook/esm2_t6_8M_UR50D", device=None, embedding_batch_size=32) -> (mean_probs, variance)`
   - Embeds raw sequences via `embed_sequences` (no tokens returned) and runs `model.predict_with_uncertainty`.
-  - The model must implement `predict_with_uncertainty` (available on `SequenceMLPEnsembleClassifier`).
+  - The model must implement `predict_with_uncertainty`.
 
 ## FitnessLandscape record predictions
 - `predict_landscape_records(model, records) -> (mean_probs, variance)`
@@ -22,7 +22,7 @@ Inference helpers live in `landscapyml.core.inference` (re-exported in `landscap
 
 ## Extensibility
 - `LandscapeInputAdapter`: ABC that yields batches from a landscape and converts them into model inputs.
-- `GraphTensorInputAdapter`: generic core adapter for models that consume `landscape.to_graph_tensor(...)`.
+- `GraphTensorInputAdapter`: generic core adapter for models that consume `landscape.to_graph_tensor(...)`; it falls back to graph edges plus embeddings or length/composition node features when one-hot graph tensors cannot represent variable-length sequences.
 - `NodeIndexInputAdapter`: generic core adapter for models that consume landscape node indices as inputs.
 - `LandscapeOutputAdapter`: ABC that converts model outputs into landscape fitness layers.
 - `register_input_adapter(name, factory, overwrite=False)`: Register a landscape input adapter (e.g., graph/structure extractors).
@@ -31,9 +31,8 @@ Inference helpers live in `landscapyml.core.inference` (re-exported in `landscap
 - `register_output_adapter(kind, adapter, overwrite=False)`: Register a landscape output adapter class/instance for a layer kind.
 - `register_layer_adapter(kind, adapter, overwrite=False)`: Convenience wrapper for function-style output adapters.
 
-Model-specific bridges should live at the package edge. See
-`landscapyml.examples.boltz2_adapter` for an example of how to integrate a
-specialized inference stack without making it part of the package core.
+Model-specific bridges should live at the package edge rather than in the
+shared core.
 
 For graph-native models, `landscapyml.examples.gat_fitness` reuses the core
 `GraphTensorInputAdapter` and also exposes a backwards-compatible

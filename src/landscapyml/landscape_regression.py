@@ -13,7 +13,9 @@ import networkx as nx
 import numpy as np
 
 from .core.inference import infer_fitness_layer_from_landscape
-from .core.trainer import TrainingJob, _MODEL_REGISTRY
+from .core.data_utils import sequence_composition_features
+from .core.model_registry import _MODEL_REGISTRY
+from .core.trainer import TrainingJob
 
 
 @dataclass(frozen=True)
@@ -245,16 +247,42 @@ def _build_connected_landscape(
     from fitness_landscape._const import PROT_20
     from fitness_landscape.core.landscape import FitnessLandscape, read_csv_landscape
 
-    landscape = read_csv_landscape(
-        path,
-        sequence_col=sequence_column,
-        alphabet=PROT_20,
-        moltype=moltype,
-        graph="hamming",
-        numeric_layers=[target_column],
-        embedding_domain="ohe",
-        attach_embeddings=False,
-    )
+    try:
+        landscape = read_csv_landscape(
+            path,
+            sequence_col=sequence_column,
+            alphabet=PROT_20,
+            moltype=moltype,
+            graph="hamming",
+            numeric_layers=[target_column],
+            embedding_domain="ohe",
+            attach_embeddings=False,
+        )
+    except ValueError as exc:
+        if "must all have the same length" not in str(exc):
+            raise
+        landscape, k = _build_composition_knn_landscape_from_csv(
+            path,
+            sequence_column=sequence_column,
+            target_column=target_column,
+            moltype=moltype,
+            alphabet=PROT_20,
+        )
+        summary = _component_summary(landscape.graph)
+        graph_info = {
+            "requested": "hamming",
+            "used": "composition_knn",
+            "hamming_error": str(exc),
+            "composition_knn_k": k,
+            "composition_knn": summary,
+        }
+        if summary["component_count"] != 1:
+            raise RuntimeError(
+                "Composition KNN fallback did not produce a single connected "
+                f"component for {path} with k={k}."
+            ) from exc
+        return landscape, graph_info
+
     hamming_summary = _component_summary(landscape.graph)
     graph_info: dict[str, Any] = {
         "requested": "hamming",
@@ -289,9 +317,94 @@ def _build_connected_landscape(
     return knn_landscape, graph_info
 
 
+def _build_composition_knn_landscape_from_csv(
+    path: Path,
+    *,
+    sequence_column: str,
+    target_column: str,
+    moltype: str | None,
+    alphabet: Sequence[Any],
+) -> tuple[Any, int]:
+    import pandas as pd
+    from fitness_landscape.core.fitness import NumericFitness
+    from fitness_landscape.core.landscape import FitnessLandscape
+    from fitness_landscape.core.sequence import make_sequence
+
+    df = pd.read_csv(path)
+    if sequence_column not in df.columns:
+        raise ValueError(f"CSV is missing sequence column {sequence_column!r}.")
+    if target_column not in df.columns:
+        raise ValueError(f"CSV is missing target column {target_column!r}.")
+
+    sequences = [
+        make_sequence(value, alphabet=alphabet, moltype=moltype)
+        for value in df[sequence_column].tolist()
+    ]
+    layer = NumericFitness.from_scalars(
+        target_column,
+        df[target_column].to_numpy(dtype=float),
+    )
+    n = len(sequences)
+    k = max(1, int(math.sqrt(n)))
+    graph = _composition_knn_graph(sequences, k=k, alphabet=alphabet)
+    summary = _component_summary(graph)
+    while summary["component_count"] != 1 and k < max(1, n - 1):
+        k = min(n - 1, max(k + 1, k * 2))
+        graph = _composition_knn_graph(sequences, k=k, alphabet=alphabet)
+        summary = _component_summary(graph)
+
+    return (
+        FitnessLandscape.build(
+            sequences=sequences,
+            graph=graph,
+            fitness_layers={target_column: layer},
+            embedding_domain="ohe",
+            attach_embeddings=False,
+        ),
+        k,
+    )
+
+
+def _composition_knn_graph(
+    sequences: Sequence[Any],
+    *,
+    k: int,
+    alphabet: Sequence[Any],
+) -> nx.Graph:
+    from scipy.spatial import cKDTree
+
+    n = len(sequences)
+    graph = nx.Graph()
+    for idx, sequence in enumerate(sequences):
+        graph.add_node(idx, sequence=sequence)
+    if n <= 1:
+        return graph
+
+    k = min(max(1, int(k)), n - 1)
+    features = sequence_composition_features(sequences, alphabet=alphabet)
+    tree = cKDTree(features)
+    distances, indices = tree.query(features, k=k + 1)
+    distances = np.asarray(distances)
+    indices = np.asarray(indices)
+    if indices.ndim == 1:
+        indices = indices[:, None]
+        distances = distances[:, None]
+
+    for src in range(n):
+        for distance, dst in zip(distances[src], indices[src]):
+            dst = int(dst)
+            if dst == src:
+                continue
+            graph.add_edge(src, dst, distance=float(distance))
+    return graph
+
+
 def _component_summary(graph: nx.Graph) -> dict[str, Any]:
     undirected = graph.to_undirected() if graph.is_directed() else graph
-    sizes = sorted((len(component) for component in nx.connected_components(undirected)), reverse=True)
+    sizes = sorted(
+        (len(component) for component in nx.connected_components(undirected)),
+        reverse=True,
+    )
     count = len(sizes)
     return {
         "component_count": count,

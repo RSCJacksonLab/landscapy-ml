@@ -173,6 +173,23 @@ def _compute_diffusion_covariance_matrix(
     return 0.5 * (cov + cov.T)
 
 
+def _scalar_feature_normalization_stats(
+    values: torch.Tensor,
+    *,
+    eps: float = 1e-8,
+) -> tuple[float, float]:
+    tensor = torch.as_tensor(values, dtype=torch.float32).view(-1)
+    if tensor.numel() == 0:
+        raise ValueError("Cannot normalize an empty feature tensor.")
+    if not bool(torch.isfinite(tensor).all()):
+        raise ValueError("Cannot normalize features containing NaN or Inf values.")
+    mean = float(tensor.mean().item())
+    scale = float(tensor.std(unbiased=False).item())
+    if scale <= float(eps):
+        scale = 1.0
+    return mean, scale
+
+
 @dataclass
 class DiffusionGPArtifacts:
     covariance_matrix: torch.Tensor
@@ -187,6 +204,9 @@ class DiffusionGPArtifacts:
     t_map: float
     signal_variance: float
     mask_tokens: tuple[str, ...]
+    normalize_features: bool = False
+    feature_normalization_mean: float = 0.0
+    feature_normalization_scale: float = 1.0
 
 
 @dataclass
@@ -214,6 +234,8 @@ def build_diffusion_gp_artifacts_from_landscape(
     bootstrap_samples: int = 200,
     random_state: Optional[int] = None,
     min_signal_variance: float = 1e-6,
+    normalize_features: bool = False,
+    feature_normalization_eps: float = 1e-8,
 ) -> DiffusionGPArtifacts:
     """
     Build the fixed diffusion covariance and node-index training inputs for an
@@ -334,6 +356,13 @@ def build_diffusion_gp_artifacts_from_landscape(
     all_inputs = torch.arange(num_nodes, dtype=torch.float32).view(-1, 1)
     train_inputs = all_inputs[resolved_train_indices]
     train_targets = full_targets[resolved_train_indices]
+    feature_mean = 0.0
+    feature_scale = 1.0
+    if normalize_features:
+        feature_mean, feature_scale = _scalar_feature_normalization_stats(
+            train_inputs,
+            eps=feature_normalization_eps,
+        )
 
     return DiffusionGPArtifacts(
         covariance_matrix=covariance_tensor,
@@ -348,6 +377,9 @@ def build_diffusion_gp_artifacts_from_landscape(
         t_map=t_map,
         signal_variance=signal_variance,
         mask_tokens=normalized_mask_tokens,
+        normalize_features=bool(normalize_features),
+        feature_normalization_mean=feature_mean,
+        feature_normalization_scale=feature_scale,
     )
 
 
@@ -366,24 +398,57 @@ class DiffusionPriorKernel(_KernelBase):
 
     is_stationary = False
 
-    def __init__(self, covariance_matrix: torch.Tensor, *, jitter: float = 1e-4) -> None:
+    def __init__(
+        self,
+        covariance_matrix: torch.Tensor,
+        *,
+        jitter: float = 1e-4,
+        normalize_features: bool = False,
+        feature_normalization_mean: float = 0.0,
+        feature_normalization_scale: float = 1.0,
+    ) -> None:
         _load_gpytorch()
         super().__init__()
         cov = torch.as_tensor(covariance_matrix, dtype=torch.float32)
         if cov.ndim != 2 or cov.shape[0] != cov.shape[1]:
             raise ValueError("covariance_matrix must be a square matrix.")
         self.register_buffer("covariance_matrix", cov)
+        self.register_buffer(
+            "feature_normalization_mean",
+            torch.tensor(float(feature_normalization_mean), dtype=torch.float32),
+        )
+        self.register_buffer(
+            "feature_normalization_scale",
+            torch.tensor(float(feature_normalization_scale), dtype=torch.float32),
+        )
+        self.normalize_features = bool(normalize_features)
         self.jitter = float(jitter)
+        if self.normalize_features and float(feature_normalization_scale) <= 0:
+            raise ValueError("feature_normalization_scale must be positive.")
 
-    @staticmethod
-    def _to_index_tensor(x: torch.Tensor) -> torch.Tensor:
-        flat = x.view(-1).to(dtype=torch.long)
+    def _to_index_tensor(self, x: torch.Tensor) -> torch.Tensor:
+        flat = x.view(-1).to(dtype=torch.float32)
+        if self.normalize_features:
+            scale = self.feature_normalization_scale.to(device=flat.device, dtype=flat.dtype)
+            mean = self.feature_normalization_mean.to(device=flat.device, dtype=flat.dtype)
+            flat = flat * scale + mean
+        flat = torch.round(flat).to(dtype=torch.long)
         if flat.numel() == 0:
             raise ValueError("GP inputs must contain at least one node index.")
+        if bool((flat < 0).any()) or bool((flat >= self.covariance_matrix.shape[0]).any()):
+            raise ValueError("GP node-index inputs are outside the covariance matrix.")
         return flat
 
-    def forward(self, x1: torch.Tensor, x2: torch.Tensor, diag: bool = False, **params: Any):
+    def forward(
+        self,
+        x1: torch.Tensor,
+        x2: torch.Tensor | None = None,
+        diag: bool = False,
+        **params: Any,
+    ):
         del params
+        if x2 is None:
+            x2 = x1
         idx1 = self._to_index_tensor(x1)
         idx2 = self._to_index_tensor(x2)
         cov = self.covariance_matrix.index_select(0, idx1).index_select(1, idx2)
@@ -420,12 +485,26 @@ class DiffusionPriorExactGP(_ExactGPBase):
         likelihood: Any = None,
         mean_mode: str = "constant",
         jitter: float = 1e-4,
+        normalize_features: bool = False,
+        feature_normalization_mean: float = 0.0,
+        feature_normalization_scale: float = 1.0,
     ) -> None:
         gp = _load_gpytorch()
         if likelihood is None:
             likelihood = gp.likelihoods.GaussianLikelihood()
         super().__init__(train_x, train_y, likelihood)
         self.likelihood = likelihood
+        self.normalize_features = bool(normalize_features)
+        self.register_buffer(
+            "feature_normalization_mean",
+            torch.tensor(float(feature_normalization_mean), dtype=torch.float32),
+        )
+        self.register_buffer(
+            "feature_normalization_scale",
+            torch.tensor(float(feature_normalization_scale), dtype=torch.float32),
+        )
+        if self.normalize_features and float(feature_normalization_scale) <= 0:
+            raise ValueError("feature_normalization_scale must be positive.")
         if mean_mode == "constant":
             self.mean_module = gp.means.ConstantMean()
         elif mean_mode == "zero":
@@ -435,12 +514,23 @@ class DiffusionPriorExactGP(_ExactGPBase):
         self.covar_module = DiffusionPriorKernel(
             covariance_matrix=covariance_matrix,
             jitter=jitter,
+            normalize_features=normalize_features,
+            feature_normalization_mean=feature_normalization_mean,
+            feature_normalization_scale=feature_normalization_scale,
         )
+
+    def _normalize_inputs(self, x: torch.Tensor) -> torch.Tensor:
+        if not self.normalize_features:
+            return x
+        scale = self.feature_normalization_scale.to(device=x.device, dtype=x.dtype)
+        mean = self.feature_normalization_mean.to(device=x.device, dtype=x.dtype)
+        return (x - mean) / scale
 
     def forward(self, x: torch.Tensor):
         gp = _load_gpytorch()
-        mean_x = self.mean_module(x)
-        covar_x = self.covar_module(x)
+        normalized_x = self._normalize_inputs(x)
+        mean_x = self.mean_module(normalized_x)
+        covar_x = self.covar_module(normalized_x)
         return gp.distributions.MultivariateNormal(mean_x, covar_x)
 
     def predict_distribution(self, inputs: torch.Tensor):
@@ -476,6 +566,8 @@ def fit_diffusion_prior_gp(
     bootstrap_samples: int = 200,
     random_state: Optional[int] = None,
     min_signal_variance: float = 1e-6,
+    normalize_features: bool = False,
+    feature_normalization_eps: float = 1e-8,
     training_iters: int = 100,
     learning_rate: float = 0.1,
     jitter: float = 1e-4,
@@ -508,6 +600,8 @@ def fit_diffusion_prior_gp(
         bootstrap_samples=bootstrap_samples,
         random_state=random_state,
         min_signal_variance=min_signal_variance,
+        normalize_features=normalize_features,
+        feature_normalization_eps=feature_normalization_eps,
     )
 
     if artifacts.train_inputs.shape[0] > 2000:
@@ -528,6 +622,9 @@ def fit_diffusion_prior_gp(
         covariance_matrix=covariance_matrix,
         mean_mode=mean_mode,
         jitter=jitter,
+        normalize_features=artifacts.normalize_features,
+        feature_normalization_mean=artifacts.feature_normalization_mean,
+        feature_normalization_scale=artifacts.feature_normalization_scale,
     )
     model = model.to(training_device)
     model.likelihood = model.likelihood.to(training_device)
