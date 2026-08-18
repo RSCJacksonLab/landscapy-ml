@@ -32,11 +32,13 @@ class SplitIndices:
         }
 
     def counts(self) -> dict[str, int]:
-        return {
+        counts = {
             "train": len(self.train),
             "val": len(self.val),
             "test": len(self.test),
         }
+        counts["total"] = sum(counts.values())
+        return counts
 
 
 @dataclass(frozen=True)
@@ -209,6 +211,11 @@ def _read_split_indices(
     total = 0
     train_label_norm = train_label.strip().lower()
     test_label_norm = test_label.strip().lower()
+    if not train_label_norm or not test_label_norm:
+        raise ValueError("train_label and test_label must be non-empty strings.")
+    if train_label_norm == test_label_norm:
+        raise ValueError("train_label and test_label must be distinct.")
+    unexpected: dict[str, list[int]] = {}
     with _open_csv_text(path) as handle:
         reader = csv.DictReader(handle)
         if reader.fieldnames is None:
@@ -218,19 +225,40 @@ def _read_split_indices(
         for idx, row in enumerate(reader):
             total = idx + 1
             is_validation = has_validation and _parse_bool(row.get(validation_column))
-            split_value = str(row.get(split_column, "")).strip().lower() if has_split else ""
+            split_value = (
+                str(row.get(split_column, "")).strip().lower() if has_split else ""
+            )
             if is_validation:
                 val.append(idx)
             elif not has_split or split_value == train_label_norm:
                 train.append(idx)
             elif split_value == test_label_norm:
                 test.append(idx)
+            else:
+                display_value = split_value or "<blank>"
+                unexpected.setdefault(display_value, []).append(reader.line_num)
+    if unexpected:
+        details = "; ".join(
+            f"{value!r} (rows {', '.join(str(row) for row in rows[:5])})"
+            for value, rows in sorted(unexpected.items())
+        )
+        raise ValueError(
+            f"Unexpected values in split column {split_column!r} of {path}: "
+            f"{details}. Expected {train_label_norm!r} or {test_label_norm!r}; "
+            f"rows marked in {validation_column!r} take validation precedence."
+        )
     if not train:
-        remaining = sorted(set(range(total)) - set(val) - set(test))
-        train.extend(remaining)
-    if not train:
-        raise ValueError(f"No training rows could be inferred from {path}.")
-    return SplitIndices(train=train, val=val, test=test)
+        raise ValueError(
+            f"No training rows could be inferred from {path} "
+            f"({total} data rows)."
+        )
+    splits = SplitIndices(train=train, val=val, test=test)
+    if splits.counts()["total"] != total:
+        raise RuntimeError(
+            f"Internal split assignment error for {path}: assigned "
+            f"{splits.counts()['total']} of {total} rows."
+        )
+    return splits
 
 
 def _parse_bool(value: Any) -> bool:
