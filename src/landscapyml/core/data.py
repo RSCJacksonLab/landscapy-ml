@@ -179,7 +179,9 @@ class LandscapeDataModule(pl.LightningDataModule):
         super().__init__()
         self.train_records = normalize_records(train_data)
         self.val_records = normalize_records(val_data) if val_data is not None else []
-        self.test_records = normalize_records(test_data) if test_data is not None else []
+        self.test_records = (
+            normalize_records(test_data) if test_data is not None else []
+        )
         self.predict_records = (
             normalize_records(predict_data) if predict_data is not None else []
         )
@@ -453,7 +455,9 @@ def build_regression_graph_from_landscape(
     inputs supplied by the caller.
     """
     if not hasattr(landscape, "to_graph_tensor") and not hasattr(landscape, "graph"):
-        raise ValueError("Landscape must implement to_graph_tensor() or expose a graph.")
+        raise ValueError(
+            "Landscape must implement to_graph_tensor() or expose a graph."
+        )
     layers = getattr(landscape, "fitness_layers", None)
     if not isinstance(layers, Mapping) or target_layer not in layers:
         raise ValueError(f"Landscape does not contain target layer '{target_layer}'.")
@@ -525,12 +529,16 @@ def _graph_tensor_from_landscape_graph(landscape: Any) -> Any:
     source_graph = getattr(landscape, "graph", None)
     sequences = list(getattr(landscape, "sequences", []) or [])
     if source_graph is None or not sequences:
-        raise ValueError("Landscape graph tensor fallback requires graph and sequences.")
+        raise ValueError(
+            "Landscape graph tensor fallback requires graph and sequences."
+        )
 
     node_order = list(getattr(landscape, "_node_order", list(source_graph.nodes())))
     node_to_idx = {node: idx for idx, node in enumerate(node_order)}
 
-    embedding = landscape.get_embedding() if hasattr(landscape, "get_embedding") else None
+    embedding = (
+        landscape.get_embedding() if hasattr(landscape, "get_embedding") else None
+    )
     if embedding is not None and len(embedding) == len(node_order):
         x = torch.as_tensor(embedding, dtype=torch.float32)
     else:

@@ -1,14 +1,17 @@
 import numpy as np
 import pytest
 import torch
+
+from landscapyml.core.adaptor import (
+    register_layer_adapter,
+    register_model_adapter,
+    register_model_layer_mapping,
+)
 from landscapyml.core.inference import (
     LandscapeInferenceResult,
     infer_fitness_layer_from_landscape,
     predict_landscape_records,
     predict_sequences,
-    register_layer_adapter,
-    register_model_adapter,
-    register_model_layer_mapping,
 )
 
 
@@ -104,8 +107,7 @@ def test_predict_sequences_supports_plain_module_and_disables_grad(monkeypatch):
 def test_predict_landscape_records_accepts_generator_for_plain_module():
     model = PlainProbModel()
     records = (
-        {"embedding": torch.tensor(feature)}
-        for feature in ([1.0, 0.0], [0.0, 1.0])
+        {"embedding": torch.tensor(feature)} for feature in ([1.0, 0.0], [0.0, 1.0])
     )
 
     mean, var = predict_landscape_records(model, records)
@@ -274,9 +276,7 @@ def test_infer_fitness_layer_attachment_and_copy_semantics(
     monkeypatch.setattr(
         "landscapyml.core.adaptor.ProbabilisticCategoricalFitness", StubFitness
     )
-    landscape = DummyLandscape(
-        np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float)
-    )
+    landscape = DummyLandscape(np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float))
     model = DummyProbModel(num_classes=2)
     register_model_layer_mapping(DummyProbModel, "prob_categorical", overwrite=True)
 
@@ -370,7 +370,9 @@ def test_model_adapter_registration(monkeypatch):
             var = torch.zeros_like(mean)
             return {"mean": mean, "var": var}
 
-    register_model_adapter(DummyModel, lambda model: DummyAdapter(model), overwrite=True)
+    register_model_adapter(
+        DummyModel, lambda model: DummyAdapter(model), overwrite=True
+    )
 
     landscape = DummyLandscape(np.array([[0.5], [1.0]], dtype=float))
     layer = infer_fitness_layer_from_landscape(

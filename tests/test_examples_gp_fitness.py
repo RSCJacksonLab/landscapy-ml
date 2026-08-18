@@ -24,7 +24,9 @@ class DummyNumericLayer:
     dtype = "numeric"
 
     def __init__(self, values):
-        self._values = [list(v) if isinstance(v, (list, tuple, np.ndarray)) else [v] for v in values]
+        self._values = [
+            list(v) if isinstance(v, (list, tuple, np.ndarray)) else [v] for v in values
+        ]
         self.metadata = {}
 
     def to_scalar(self, aggregate_func=np.mean):
@@ -39,7 +41,9 @@ class DummyLandscape:
         self.graph = nx.path_graph(4)
         for node, seq in zip(self.graph.nodes(), ["AA", "AX", "AC", "AD"]):
             self.graph.nodes[node]["sequence"] = DummySequence(seq)
-        self.sequences = [self.graph.nodes[node]["sequence"] for node in self.graph.nodes()]
+        self.sequences = [
+            self.graph.nodes[node]["sequence"] for node in self.graph.nodes()
+        ]
         self.fitness_layers = {
             "score": DummyNumericLayer([1.0, 2.0, 3.0, np.nan]),
         }

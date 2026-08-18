@@ -110,7 +110,9 @@ def test_build_regression_graph_adds_training_feature_normalization(monkeypatch)
     assert torch.allclose(graph.feature_normalization_mean, torch.tensor([1.0, 0.5]))
     assert torch.allclose(graph.feature_normalization_scale, torch.tensor([1.0, 0.5]))
 
-    model = GraphAttentionFitnessRegressor(num_features=2, hidden_channels=4, num_layers=1)
+    model = GraphAttentionFitnessRegressor(
+        num_features=2, hidden_channels=4, num_layers=1
+    )
     normalized = model._normalize_features(graph)
     assert torch.allclose(
         normalized,
@@ -134,7 +136,9 @@ def test_graph_attention_regressor_forward(monkeypatch):
     from landscapyml.examples.gat_fitness import GraphAttentionFitnessRegressor
 
     graph = DummyGraph()
-    model = GraphAttentionFitnessRegressor(num_features=2, hidden_channels=4, num_layers=2)
+    model = GraphAttentionFitnessRegressor(
+        num_features=2, hidden_channels=4, num_layers=2
+    )
     out = model(graph)
     assert out.shape == (3,)
 

@@ -203,9 +203,7 @@ def test_generic_datamodule_allows_zero_split_for_one_record():
     ("record_count", "val_split"),
     [(1, 0.01), (2, 0.75), (2, 0.999999)],
 )
-def test_generic_datamodule_rejects_splits_that_empty_training(
-    record_count, val_split
-):
+def test_generic_datamodule_rejects_splits_that_empty_training(record_count, val_split):
     with pytest.raises(
         ValueError,
         match=rf"val_split={val_split} leaves no training records from {record_count}",

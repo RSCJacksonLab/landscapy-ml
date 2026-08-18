@@ -11,6 +11,7 @@ import torch
 import landscapyml.landscape_regression as regression
 from landscapyml.landscape_regression import _read_split_indices, _regression_metrics
 
+
 def test_read_split_indices_rejects_unknown_labels_with_row_numbers(tmp_path):
     path = _write_csv(
         tmp_path / "unknown.csv",
@@ -139,6 +140,8 @@ def test_regression_metrics_keep_undefined_correlations_as_none(target, predicti
 
     assert metrics["pearson"] is None
     assert metrics["spearman"] is None
+
+
 @pytest.fixture(autouse=True)
 def restore_runner_registry():
     original = dict(regression._LANDSCAPE_REGRESSION_RUNNERS)
@@ -167,8 +170,12 @@ def test_split_indices_accessors_return_copies() -> None:
 
 
 def test_runner_registration_duplicate_and_overwrite() -> None:
-    first = lambda context: {"runner": "first"}
-    second = lambda context: {"runner": "second"}
+    def first(context):
+        return {"runner": "first"}
+
+    def second(context):
+        return {"runner": "second"}
+
     regression.register_landscape_regression_runner("unit", first, overwrite=True)
 
     with pytest.raises(ValueError, match="already registered"):
@@ -499,14 +506,9 @@ def test_metrics_and_json_serialization_helpers() -> None:
     assert metrics["val"]["n"] == 0
     assert metrics["test"]["pearson"] is None
     assert (
-        regression._correlation(
-            np.array([1.0]), np.array([1.0]), method="pearson"
-        )
+        regression._correlation(np.array([1.0]), np.array([1.0]), method="pearson")
         is None
     )
-    assert (
-        regression._correlation(np.ones(2), np.arange(2), method="spearman")
-        is None
-    )
+    assert regression._correlation(np.ones(2), np.arange(2), method="spearman") is None
     assert regression._to_jsonable(torch.tensor([1.0, 2.0])) == [1.0, 2.0]
     assert regression._to_jsonable(np.float64(3.0)) == 3.0

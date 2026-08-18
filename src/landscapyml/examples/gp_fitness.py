@@ -175,7 +175,9 @@ def _compute_diffusion_covariance_matrix(
     eigenvectors = np.asarray(eigenvectors, dtype=float)
     lambda_adjusted = eigenvalues + float(epsilon)
     heat = np.exp(-float(t) * lambda_adjusted)
-    scale = (float(signal_variance) * len(eigenvalues)) / max(float(np.sum(heat)), epsilon)
+    scale = (float(signal_variance) * len(eigenvalues)) / max(
+        float(np.sum(heat)), epsilon
+    )
     cov = eigenvectors @ np.diag(heat * scale) @ eigenvectors.T
     return 0.5 * (cov + cov.T)
 
@@ -359,14 +361,18 @@ def build_diffusion_gp_artifacts_from_landscape(
     if full_targets.ndim != 1:
         full_targets = full_targets.view(-1)
     if full_targets.shape[0] != len(landscape.sequences):
-        raise ValueError("Target layer length does not match the number of landscape sequences.")
+        raise ValueError(
+            "Target layer length does not match the number of landscape sequences."
+        )
 
     num_nodes = full_targets.shape[0]
     observed_mask = torch.isfinite(full_targets)
     if train_indices is None:
         resolved_train_indices = torch.nonzero(observed_mask, as_tuple=False).view(-1)
     else:
-        resolved_train_indices = torch.as_tensor(train_indices, dtype=torch.long).view(-1)
+        resolved_train_indices = torch.as_tensor(train_indices, dtype=torch.long).view(
+            -1
+        )
         if resolved_train_indices.numel() > 0:
             if bool((resolved_train_indices < 0).any()) or bool(
                 (resolved_train_indices >= num_nodes).any()
@@ -559,13 +565,19 @@ class DiffusionPriorKernel(_KernelBase):
     def _to_index_tensor(self, x: torch.Tensor) -> torch.Tensor:
         flat = x.view(-1).to(dtype=torch.float32)
         if self.normalize_features:
-            scale = self.feature_normalization_scale.to(device=flat.device, dtype=flat.dtype)
-            mean = self.feature_normalization_mean.to(device=flat.device, dtype=flat.dtype)
+            scale = self.feature_normalization_scale.to(
+                device=flat.device, dtype=flat.dtype
+            )
+            mean = self.feature_normalization_mean.to(
+                device=flat.device, dtype=flat.dtype
+            )
             flat = flat * scale + mean
         flat = torch.round(flat).to(dtype=torch.long)
         if flat.numel() == 0:
             raise ValueError("GP inputs must contain at least one node index.")
-        if bool((flat < 0).any()) or bool((flat >= self.covariance_matrix.shape[0]).any()):
+        if bool((flat < 0).any()) or bool(
+            (flat >= self.covariance_matrix.shape[0]).any()
+        ):
             raise ValueError("GP node-index inputs are outside the covariance matrix.")
         return flat
 
@@ -609,11 +621,15 @@ class DiffusionPriorKernel(_KernelBase):
         cov = self.covariance_matrix.index_select(0, idx1).index_select(1, idx2)
 
         if idx1.numel() == idx2.numel() and torch.equal(idx1, idx2) and self.jitter > 0:
-            cov = cov + torch.eye(
-                cov.shape[0],
-                dtype=cov.dtype,
-                device=cov.device,
-            ) * self.jitter
+            cov = (
+                cov
+                + torch.eye(
+                    cov.shape[0],
+                    dtype=cov.dtype,
+                    device=cov.device,
+                )
+                * self.jitter
+            )
 
         if diag:
             return torch.diagonal(cov, dim1=-2, dim2=-1)
@@ -778,6 +794,7 @@ class DiffusionPriorExactGP(_ExactGPBase):
         posterior = self.predict_distribution(inputs)
         return posterior.mean
 
+
 def fit_diffusion_prior_gp(
     landscape: Any,
     *,
@@ -906,7 +923,9 @@ def fit_diffusion_prior_gp(
             RuntimeWarning,
         )
 
-    training_device = torch.device(device) if device is not None else torch.device("cpu")
+    training_device = (
+        torch.device(device) if device is not None else torch.device("cpu")
+    )
     train_x = artifacts.train_inputs.to(training_device)
     train_y = artifacts.train_targets.to(training_device)
     covariance_matrix = artifacts.covariance_matrix.to(training_device)

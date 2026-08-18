@@ -259,7 +259,9 @@ def _load_object(path: str) -> Any:
     try:
         return getattr(module, attr)
     except AttributeError as exc:
-        raise ImportError(f"Could not find '{attr}' in module '{module_path}'.") from exc
+        raise ImportError(
+            f"Could not find '{attr}' in module '{module_path}'."
+        ) from exc
 
 
 def build_external_model(

@@ -199,7 +199,10 @@ _MODEL_TO_LAYER: dict[Type[Any], str] = {}
 
 
 def register_model_adapter(
-    model_cls: Type[Any], adapter_factory: ModelAdapterFactory, *, overwrite: bool = False
+    model_cls: Type[Any],
+    adapter_factory: ModelAdapterFactory,
+    *,
+    overwrite: bool = False,
 ) -> None:
     """Register a model-adapter factory for a model class.
 
@@ -483,7 +486,9 @@ def export_landscape_records(
         as_batch=False,
     )
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
-        raise ValueError("to_sequence_tensors must return a sequence of record mappings.")
+        raise ValueError(
+            "to_sequence_tensors must return a sequence of record mappings."
+        )
 
     requested_layers = list(fitness_layers) if fitness_layers is not None else None
     rename_map = dict(rename_fitness or {})
@@ -497,7 +502,9 @@ def export_landscape_records(
 
         fitness = rec.get("fitness_tensors")
         if not isinstance(fitness, Mapping):
-            raise ValueError("Landscape export records must contain a fitness_tensors mapping.")
+            raise ValueError(
+                "Landscape export records must contain a fitness_tensors mapping."
+            )
 
         if selected_layer_names is None:
             selected_layer_names = list(fitness.keys())
@@ -1454,5 +1461,7 @@ register_output_adapter(
     NumericOutputAdapter.layer_kind, NumericOutputAdapter, overwrite=True
 )
 register_output_adapter(
-    ProbCategoricalOutputAdapter.layer_kind, ProbCategoricalOutputAdapter, overwrite=True
+    ProbCategoricalOutputAdapter.layer_kind,
+    ProbCategoricalOutputAdapter,
+    overwrite=True,
 )

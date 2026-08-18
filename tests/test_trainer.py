@@ -1,11 +1,13 @@
 from types import SimpleNamespace
 
-import landscapyml.core.trainer as trainer_module
 import pytest
 import pytorch_lightning as pl
 import torch
+
+import landscapyml.core.trainer as trainer_module
 from landscapyml.core.model_registry import register_data, register_model
 from landscapyml.core.trainer import TrainingJob, create_trainer
+
 
 class StubTrainer:
     def __init__(self, **kwargs):
@@ -86,9 +88,7 @@ def test_create_trainer_explicitly_disables_wandb(
     assert len(trainer.kwargs["logger"]) == 1
 
 
-def test_create_trainer_enables_available_wandb(
-    monkeypatch, stub_trainer_dependencies
-):
+def test_create_trainer_enables_available_wandb(monkeypatch, stub_trainer_dependencies):
     calls = []
 
     class StubWandbLogger:

@@ -1,13 +1,11 @@
-import sys
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
+
 from landscapyml.core.adaptor import (
-    DefaultModelAdapter,
     EmbeddingInputAdapter,
-    FunctionOutputAdapter,
     GraphTensorInputAdapter,
     NodeIndexInputAdapter,
     NumericOutputAdapter,

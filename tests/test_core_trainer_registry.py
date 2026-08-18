@@ -7,13 +7,11 @@ import pytorch_lightning as pl
 from landscapyml.core.model_registry import (
     available_data_builders,
     available_models,
+    build_external_model,
     factory_accepts_kwargs,
     get_data_factory,
     get_model_entry,
     normalize_split_indices,
-)
-from landscapyml.core.trainer import (
-    build_external_model,
     register_data,
     register_model,
 )
