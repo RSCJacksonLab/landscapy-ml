@@ -12,6 +12,7 @@ from landscapyml.core.adaptor import (
     NodeIndexInputAdapter,
     NumericOutputAdapter,
     ProbCategoricalOutputAdapter,
+    export_landscape_records,
     infer_device,
     normalize_adapter_outputs,
     register_input_adapter,
@@ -26,7 +27,12 @@ from landscapyml.core.adaptor import (
 
 
 class DummyLandscape:
-    def __init__(self, embeddings: np.ndarray, domain: str | None = None, model: str | None = None):
+    def __init__(
+        self,
+        embeddings: np.ndarray,
+        domain: str | None = None,
+        model: str | None = None,
+    ):
         self._embeddings = embeddings
         self._active_embedding_domain = domain
         self.embedding_model = model
@@ -77,7 +83,9 @@ def test_resolve_model_adapter_prefers_registered_factory():
         def predict(self, x):
             return {"output": x + 1}
 
-    register_model_adapter(CustomModel, lambda model: CustomAdapter(model), overwrite=True)
+    register_model_adapter(
+        CustomModel, lambda model: CustomAdapter(model), overwrite=True
+    )
     adapter = resolve_model_adapter(CustomModel())
     assert isinstance(adapter, CustomAdapter)
 
@@ -379,3 +387,210 @@ def test_infer_device_prefers_explicit_device_attribute():
     model = ParamModel()
     dev2 = infer_device(model)
     assert dev2 == model.linear.weight.device
+
+
+def test_export_landscape_records_selects_renames_and_maps_categories():
+    class CategoryLayer:
+        categories = ["low", "high"]
+
+    class Landscape:
+        fitness_layers = {"score": CategoryLayer()}
+
+        def __init__(self):
+            self.kwargs = None
+
+        def to_sequence_tensors(self, **kwargs):
+            self.kwargs = kwargs
+            return [
+                {
+                    "sequence_tensor": torch.tensor([1, 2]),
+                    "embedding": torch.tensor([0.5]),
+                    "attention_mask": torch.tensor([1, 1]),
+                    "fitness_tensors": {
+                        "score": torch.tensor([1.0]),
+                        "ignored": torch.tensor([2.0]),
+                    },
+                }
+            ]
+
+    landscape = Landscape()
+    exported = export_landscape_records(
+        landscape,
+        fitness_layers=["score"],
+        rename_fitness={"score": "target"},
+        sequence_idx=[0],
+        feature_view="embedding",
+    )
+
+    assert list(exported.records[0]["fitness_tensors"]) == ["target"]
+    assert "embedding" in exported.records[0]
+    assert "attention_mask" in exported.records[0]
+    assert exported.fitness_mappings == {"target": ["low", "high"]}
+    assert landscape.kwargs["sequence_idx"] == [0]
+    assert landscape.kwargs["feature_view"] == "embedding"
+    assert landscape.kwargs["as_batch"] is False
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        ({"not": "a sequence"}, "must return a sequence"),
+        (["not a mapping"], "must yield mapping records"),
+        ([{"sequence_tensor": torch.tensor([1])}], "fitness_tensors mapping"),
+    ],
+)
+def test_export_landscape_records_validates_return_contract(raw, message):
+    landscape = SimpleNamespace(to_sequence_tensors=lambda **kwargs: raw)
+
+    with pytest.raises(ValueError, match=message):
+        export_landscape_records(landscape)
+
+
+def test_export_landscape_records_validates_landscape_and_requested_layers():
+    with pytest.raises(ValueError, match="must implement"):
+        export_landscape_records(object())
+
+    landscape = SimpleNamespace(
+        to_sequence_tensors=lambda **kwargs: [
+            {
+                "sequence_tensor": torch.tensor([1]),
+                "fitness_tensors": {"present": torch.tensor([1.0])},
+            }
+        ]
+    )
+    with pytest.raises(ValueError, match="missing from landscape export"):
+        export_landscape_records(landscape, fitness_layers=["missing"])
+
+
+def test_export_landscape_records_accepts_empty_export():
+    landscape = SimpleNamespace(
+        to_sequence_tensors=lambda **kwargs: [],
+        fitness_layers={},
+    )
+
+    exported = export_landscape_records(landscape)
+
+    assert exported.records == []
+    assert exported.fitness_mappings == {}
+
+
+def test_embedding_input_adapter_computes_missing_embeddings():
+    class Landscape:
+        active_embedding_domain = "plm"
+
+        def __init__(self):
+            self.embedding = None
+            self.model_name = None
+
+        def get_embedding(self):
+            return self.embedding
+
+        def get_embedding_metadata(self, domain):
+            return {"model_name": "metadata-model", "embedding_mode": "hard"}
+
+        def compute_plm_embeddings(self, *, model_name):
+            self.model_name = model_name
+            self.embedding = np.ones((2, 3), dtype=np.float32)
+
+    landscape = Landscape()
+    adapter = EmbeddingInputAdapter()
+
+    batches = list(adapter.iter_batches(landscape, batch_size=8))
+
+    assert landscape.model_name == "metadata-model"
+    assert batches[0][0].shape == (2, 3)
+    assert adapter.metadata(landscape)["embedding_mode"] == "hard"
+
+
+def test_embedding_input_adapter_reports_unavailable_or_failed_computation():
+    no_compute = SimpleNamespace(get_embedding=lambda: None)
+    with pytest.raises(RuntimeError, match="cannot compute embeddings"):
+        list(EmbeddingInputAdapter().iter_batches(no_compute, batch_size=1))
+
+    failed = SimpleNamespace(
+        get_embedding=lambda: None,
+        compute_plm_embeddings=lambda **kwargs: None,
+    )
+    with pytest.raises(RuntimeError, match="automatic computation failed"):
+        list(EmbeddingInputAdapter().iter_batches(failed, batch_size=1))
+
+
+def test_empty_embedding_and_node_index_inputs_yield_no_batches():
+    empty_embedding = DummyLandscape(np.empty((0, 3), dtype=np.float32))
+    assert (
+        list(EmbeddingInputAdapter().iter_batches(empty_embedding, batch_size=2)) == []
+    )
+    assert (
+        list(
+            NodeIndexInputAdapter().iter_batches(
+                SimpleNamespace(sequences=[]),
+                batch_size=2,
+            )
+        )
+        == []
+    )
+
+
+def test_prob_categorical_output_adapter_validates_outputs_and_categories():
+    adapter = ProbCategoricalOutputAdapter()
+    with pytest.raises(ValueError, match="requires 'mean'"):
+        adapter.to_layer({}, None, {}, "prediction")
+    with pytest.raises(ValueError, match="categories"):
+        adapter.to_layer(
+            {"mean": torch.ones(2, 3)},
+            ["only", "two"],
+            {},
+            "prediction",
+        )
+
+
+def test_adapter_registries_reject_duplicates_and_invalid_output_adapters():
+    class Model:
+        pass
+
+    class Adapter(EmbeddingInputAdapter):
+        pass
+
+    register_model_adapter(Model, lambda model: model, overwrite=True)
+    with pytest.raises(ValueError, match="already registered"):
+        register_model_adapter(Model, lambda model: model)
+
+    register_model_layer_mapping(Model, "numeric", overwrite=True)
+    with pytest.raises(ValueError, match="already mapped"):
+        register_model_layer_mapping(Model, "numeric")
+
+    register_input_adapter("duplicate-test", Adapter, overwrite=True)
+    with pytest.raises(ValueError, match="already registered"):
+        register_input_adapter("duplicate-test", Adapter)
+
+    from landscapyml.core.adaptor import register_output_adapter
+
+    register_output_adapter("duplicate-output", NumericOutputAdapter, overwrite=True)
+    with pytest.raises(ValueError, match="already exists"):
+        register_output_adapter("duplicate-output", NumericOutputAdapter)
+    with pytest.raises(TypeError, match="instance or subclass"):
+        register_output_adapter("invalid-output", object(), overwrite=True)
+    with pytest.raises(ValueError, match="No adapter registered"):
+        resolve_output_adapter("missing-output")
+
+
+def test_numeric_output_adapter_validates_and_detaches_gradients(monkeypatch):
+    class StubFitness:
+        @classmethod
+        def from_tensor(cls, name, tensor, metadata):
+            return SimpleNamespace(name=name, tensor=tensor, metadata=metadata)
+
+    monkeypatch.setattr("landscapyml.core.adaptor.NumericFitness", StubFitness)
+    adapter = NumericOutputAdapter()
+    source = torch.tensor([1.0, 2.0], requires_grad=True)
+
+    layer = adapter.to_layer({"prediction": source}, None, {}, "prediction")
+
+    assert layer.tensor.device.type == "cpu"
+    assert layer.tensor.requires_grad is False
+    with pytest.raises(TypeError, match="non-tensor"):
+        adapter.to_layer({"output": [1.0]}, None, {}, "prediction")
+    with pytest.raises(ValueError, match="single tensor"):
+        adapter.to_layer({}, None, {}, "prediction")
+    with pytest.raises(ValueError, match="1-D or 2-D"):
+        adapter.to_layer({"output": torch.zeros(1, 1, 1)}, None, {}, "prediction")
