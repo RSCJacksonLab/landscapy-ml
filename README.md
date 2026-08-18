@@ -25,7 +25,12 @@ pip install -e ".[dev]"
 pip install -e ".[graph]"  # graph attention demo
 pip install -e ".[gp]"     # diffusion GP demo
 pip install -e ".[tuning]" # Ray Tune demo support
+pip install -e ".[tracking]" # optional Weights & Biases logging
 ```
+
+Training uses TensorBoard only by default. To opt in to Weights & Biases,
+install the ``tracking`` extra and call ``create_trainer(use_wandb=True, ...)``.
+No W&B client is imported or initialized unless that flag is enabled.
 
 ## CLI
 

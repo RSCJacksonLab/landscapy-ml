@@ -41,7 +41,7 @@ def create_trainer(
     checkpoint_mode: str = "min",
     checkpoint_every_n_epochs: int = 1,
     save_top_k: int = 1,
-    use_wandb: bool = True,
+    use_wandb: bool = False,
     wandb_project: Optional[str] = None,
     wandb_entity: Optional[str] = None,
     wandb_run_name: Optional[str] = None,
@@ -76,8 +76,9 @@ def create_trainer(
         Frequency in epochs for checkpointing.
     save_top_k : int, default=1
         Number of best checkpoints to keep.
-    use_wandb : bool, default=True
-        Whether to enable Weights & Biases logging (if available).
+    use_wandb : bool, default=False
+        Whether to opt in to Weights & Biases logging. The ``tracking`` extra
+        must be installed when this is enabled.
     wandb_project : str, optional
         Optional W&B project name.
     wandb_entity : str, optional
@@ -118,14 +119,23 @@ def create_trainer(
                     "wandb_project is None; WandbLogger will use the default W&B project.",
                     RuntimeWarning,
                 )
-            wandb_logger = WandbLogger(
-                project=wandb_project,
-                entity=wandb_entity,
-                name=wandb_run_name,
-                tags=wandb_tags,
-                save_dir=wandb_dir,
-            )
-            loggers.append(wandb_logger)
+            try:
+                wandb_logger = WandbLogger(
+                    project=wandb_project,
+                    entity=wandb_entity,
+                    name=wandb_run_name,
+                    tags=wandb_tags,
+                    save_dir=wandb_dir,
+                )
+            except (ImportError, ModuleNotFoundError) as exc:
+                warnings.warn(
+                    f"W&B logging requested but wandb is not available: {exc}. "
+                    "Install landscapy-ml[tracking] to enable it. Proceeding "
+                    "with TensorBoard only.",
+                    RuntimeWarning,
+                )
+            else:
+                loggers.append(wandb_logger)
 
     callbacks = []
     if checkpoint_monitor is not None:
