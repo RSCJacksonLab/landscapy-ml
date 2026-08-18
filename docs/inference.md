@@ -20,15 +20,15 @@ Inference helpers live in `landscapyml.core.inference` and operate on trained mo
   - Resolves a landscape input adapter (defaults to embedding-based extraction).
   - Ensures embedding domain/model compatibility between the adapter and landscape when available.
   - Batches inputs through the adapter and builds a fitness layer via the registered output adapter.
-  - With `attach=False`, returns the unattached layer; `inplace` has no effect.
+  - With `attach=False`, returns the unattached layer. `inplace` has no effect.
   - With `attach=True, inplace=True`, attaches to the supplied landscape and returns the layer, preserving the original API.
   - With `attach=True, inplace=False`, deep-copies the landscape, attaches to that copy, and returns `LandscapeInferenceResult(landscape=copy, layer=layer)`. This replaces the previous ineffective behavior, which returned only the layer and made the copy unreachable.
   - Collision-safe layer naming is resolved against the landscape that receives the layer.
-  - The `fitness_landscape` dependency is optional; when absent, imports fall back to stub types and landscape-related helpers are unavailable.
+  - Landscapy is a required dependency. Internal stub types keep partial-environment imports diagnosable when that dependency is unavailable.
 
 ## Extensibility
 - `LandscapeInputAdapter`: ABC that yields batches from a landscape and converts them into model inputs.
-- `GraphTensorInputAdapter`: generic core adapter for models that consume `landscape.to_graph_tensor(...)`; it falls back to graph edges plus embeddings or length/composition node features when one-hot graph tensors cannot represent variable-length sequences.
+- `GraphTensorInputAdapter`: generic core adapter for models that consume `landscape.to_graph_tensor(...)`. It falls back to graph edges plus embeddings or length/composition node features when one-hot graph tensors cannot represent variable-length sequences.
 - `NodeIndexInputAdapter`: generic core adapter for models that consume landscape node indices as inputs.
 - `LandscapeOutputAdapter`: ABC that converts model outputs into landscape fitness layers.
 - `register_input_adapter(name, factory, overwrite=False)`: Register a landscape input adapter (e.g., graph/structure extractors).
@@ -42,7 +42,7 @@ shared core.
 
 Both model adapter factories and model-to-layer mappings are resolved using
 Python's method resolution order (MRO). An exact-class registration therefore
-wins over a base-class registration; with multiple inheritance, the first
+wins over a base-class registration. With multiple inheritance, the first
 registered class in the model's MRO wins. A registered adapter factory takes
 priority over a model-to-layer mapping because it defines the complete
 inference interface.
@@ -80,7 +80,8 @@ register_model_layer_mapping(MyModel, "continuous_density")
 register_layer_adapter("continuous_density", my_layer_adapter)
 ```
 
-Returned tensors are moved to CPU for downstream use; callers can re-map to other devices as needed.
+Returned tensors are moved to CPU for downstream use. Callers can re-map them
+to other devices as needed.
 
 Example: custom model adapter for non-standard predict signatures
 ```python

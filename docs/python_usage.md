@@ -1,66 +1,62 @@
-# Python Usage
+# Python usage
 
-## Graph Attention Regression
+The Python interface converts Landscapy objects into PyTorch-ready data and
+adapts model predictions back into landscape fitness layers.
+
+## Records and datasets
+
+The package includes a small aligned landscape at
+`landscapyml/data/minimal_landscape.csv`. The following example constructs a
+Hamming landscape, exports its numeric target, and wraps the records as a
+PyTorch dataset.
+
 ```python
-from landscapyml import create_trainer
-from landscapyml.core.data import LandscapeGraphRegressionDataModule
-from landscapyml.examples.gat_fitness import (
-    GraphAttentionFitnessRegressor,
-    attach_graph_attention_predictions,
+from importlib.resources import files
+
+from fitness_landscape.core.landscape import read_csv_landscape
+from torch.utils.data import DataLoader
+
+from landscapyml import (
+    LandscapeDataset,
+    export_landscape_records,
+    make_fitness_target_getter,
 )
 
-dm = LandscapeGraphRegressionDataModule.from_landscape(
-    landscape=landscape,
-    target_layer="measured_fitness",
-    normalize_features=True,
+data_path = files("landscapyml").joinpath("data/minimal_landscape.csv")
+landscape = read_csv_landscape(
+    data_path,
+    sequence_col="sequence",
+    alphabet=list("AC"),
+    graph="hamming",
+    numeric_layers=["target"],
+    attach_embeddings=False,
 )
-model = GraphAttentionFitnessRegressor(num_features=dm.train_graph.x.shape[-1])
-
-trainer = create_trainer(max_epochs=50, use_wandb=False)
-trainer.fit(model, datamodule=dm)
-
-layer = attach_graph_attention_predictions(
+exported = export_landscape_records(
     landscape,
-    model,
-    layer_name="gat_predicted_fitness",
+    fitness_layers=["target"],
+    include_embeddings=False,
 )
+dataset = LandscapeDataset(
+    exported.records,
+    target_getter=make_fitness_target_getter("target"),
+)
+loader = DataLoader(dataset, batch_size=2, shuffle=False)
+
+features, targets = next(iter(loader))
+print(features.shape, targets.shape)
 ```
 
-## Diffusion-Prior GP
-```python
-from landscapyml.examples.gp_fitness import (
-    attach_diffusion_gp_predictions,
-    fit_diffusion_prior_gp,
-)
+`export_landscape_records` preserves landscape sequence order and selected
+fitness layers. `LandscapeDataset` accepts custom input and target getters when
+a model requires a different record view.
 
-fit = fit_diffusion_prior_gp(
-    landscape,
-    target_layer="measured_fitness",
-    training_iters=100,
-    learning_rate=0.05,
-)
+## Training and inference
 
-layer = attach_diffusion_gp_predictions(
-    landscape,
-    fit.model,
-    layer_name="diffusion_gp_predicted_fitness",
-)
-```
+`LandscapeDataModule` provides standard PyTorch Lightning loaders for exported
+records. `LandscapeGraphRegressionDataModule` provides the graph-native path.
+`TrainingJob` resolves registered models and data builders without adding a
+second landscape data model.
 
-## Registry-Based Training
-```python
-from landscapyml import TrainingJob
-
-job = TrainingJob(
-    model_name="graph_attention_regressor",
-    data_name="landscape_graph_regression",
-    model_kwargs={"hidden_channels": 64},
-    data_kwargs={
-        "landscape": landscape,
-        "target_layer": "measured_fitness",
-        "normalize_features": True,
-    },
-    trainer_kwargs={"max_epochs": 50, "use_wandb": False},
-)
-trainer, model, dm = job.run()
-```
+The inference adapters attach numeric or categorical predictions to a supplied
+landscape. See [Inference and landscape integration](inference.md) for adapter
+registration, device handling, copied inference, and layer attachment.

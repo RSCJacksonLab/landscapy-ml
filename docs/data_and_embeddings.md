@@ -16,15 +16,15 @@ Lightning data module wrappers for those records.
 
 `LandscapeDataModule(val_split=...)` accepts fractions from zero (inclusive)
 to one (exclusive). A positive fraction must leave at least one training and
-one validation record; infeasible fractions are rejected during initialization
+one validation record. Infeasible fractions are rejected during initialization
 before the record lists are split. Repeated `setup("fit")` calls reuse the same
 partition.
 
 ## Graph Regression
 `LandscapeGraphRegressionDataModule.from_landscape(...)` converts a numeric
 fitness layer into node-level regression targets on a single landscape graph.
-Known finite targets define train/validation/test masks; missing targets are
-available for prediction.
+Known finite targets define train, validation, and test masks. Missing targets
+are available for prediction.
 
 Variable-length sequences are supported through fallback node features:
 embeddings when present, otherwise normalized sequence length plus token
