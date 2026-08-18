@@ -261,6 +261,16 @@ def embed_sequences_to_records(
     Embed raw sequences and emit FitnessLandscape-compatible record dictionaries.
     """
 
+    sequence_count = len(sequences)
+    label_count = len(labels)
+    if sequence_count != label_count:
+        raise ValueError(
+            "sequences and labels must have the same length "
+            f"(got {sequence_count} sequences and {label_count} labels)."
+        )
+    if not isinstance(label_key, str) or not label_key.strip():
+        raise ValueError("label_key must be a non-empty string.")
+
     embeddings, tokens, masks = embed_sequences(
         sequences,
         embedding_mode=embedding_mode,
@@ -269,9 +279,6 @@ def embed_sequences_to_records(
         embedding_batch_size=embedding_batch_size,
         include_tokens=include_tokens,
     )
-
-    if len(sequences) != len(labels):
-        raise ValueError("sequences and labels must have the same length.")
 
     records: list[dict[str, Any]] = []
     for i, label in enumerate(labels):
