@@ -1,3 +1,4 @@
+import warnings
 from types import SimpleNamespace
 
 import pytest
@@ -319,7 +320,9 @@ def test_training_job_normalizes_splits_and_rejects_conflicts():
         trainer_factory=lambda **kwargs: trainer,
     )
 
-    _, _, dm = job.build()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _, _, dm = job.build()
 
     assert captured["train_indices"] == [0, 1]
     assert dm.stage == "fit"

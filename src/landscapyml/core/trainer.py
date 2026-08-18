@@ -327,6 +327,8 @@ class TrainingJob:
         for logger in (
             trainer.loggers if isinstance(trainer.logger, list) else [trainer.logger]
         ):
+            if logger is None:
+                continue
             try:
                 logger.log_hyperparams(metadata)
             except Exception as exc:
