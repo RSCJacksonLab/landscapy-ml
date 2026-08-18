@@ -18,13 +18,22 @@ from typing import (
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
+from ._optional import is_missing_optional_dependency
 from .data_utils import LandscapeRecord
 
 try:
-    from fitness_landscape.core.fitness import NumericFitness, ProbabilisticCategoricalFitness
-except Exception:  # pragma: no cover - optional dependency
-    NumericFitness = Any  # type: ignore
-    ProbabilisticCategoricalFitness = Any  # type: ignore
+    from fitness_landscape.core.fitness import (
+        NumericFitness,
+        ProbabilisticCategoricalFitness,
+    )
+except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+    if not is_missing_optional_dependency(exc, "fitness_landscape"):
+        raise
+    NumericFitness = None  # type: ignore
+    ProbabilisticCategoricalFitness = None  # type: ignore
+    _LANDSCAPY_FITNESS_IMPORT_ERROR: ModuleNotFoundError | None = exc
+else:
+    _LANDSCAPY_FITNESS_IMPORT_ERROR = None
 
 
 DEFAULT_EMBEDDING_MODEL = "facebook/esm2_t6_8M_UR50D"
@@ -38,12 +47,11 @@ def resolve_embedding_info(
         "active_embedding_domain",
         getattr(landscape, "_active_embedding_domain", None),
     )
-    meta = None
-    if hasattr(landscape, "get_embedding_metadata"):
-        try:
-            meta = landscape.get_embedding_metadata(domain)
-        except Exception:
-            meta = None
+    meta = (
+        landscape.get_embedding_metadata(domain)
+        if hasattr(landscape, "get_embedding_metadata")
+        else None
+    )
     model_name = getattr(landscape, "embedding_model", None)
     if meta is not None and meta.get("model_name"):
         model_name = meta.get("model_name")
@@ -534,6 +542,10 @@ class ProbCategoricalOutputAdapter(LandscapeOutputAdapter):
         metadata: Mapping[str, Any],
         layer_name: str,
     ) -> Any:
+        if ProbabilisticCategoricalFitness is None:
+            raise ImportError(
+                "Probabilistic fitness output requires landscapy to be installed."
+            ) from _LANDSCAPY_FITNESS_IMPORT_ERROR
         if "mean" not in outputs:
             raise ValueError(
                 "Probabilistic categorical adapter requires 'mean' prediction."
@@ -571,6 +583,10 @@ class NumericOutputAdapter(LandscapeOutputAdapter):
         metadata: Mapping[str, Any],
         layer_name: str,
     ) -> Any:
+        if NumericFitness is None:
+            raise ImportError(
+                "Numeric fitness output requires landscapy to be installed."
+            ) from _LANDSCAPY_FITNESS_IMPORT_ERROR
         tensor = outputs.get("output")
         if tensor is None and len(outputs) == 1:
             tensor = next(iter(outputs.values()))
