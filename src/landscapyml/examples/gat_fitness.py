@@ -85,7 +85,9 @@ class GraphAttentionFitnessRegressor(pl.LightningModule):
         super().__init__()
         input_dim = in_channels if in_channels is not None else num_features
         if input_dim is None or input_dim <= 0:
-            raise ValueError("GraphAttentionFitnessRegressor requires a positive input dimension.")
+            raise ValueError(
+                "GraphAttentionFitnessRegressor requires a positive input dimension."
+            )
         if num_layers < 1:
             raise ValueError("num_layers must be at least 1.")
         if hidden_channels <= 0:
@@ -134,10 +136,16 @@ class GraphAttentionFitnessRegressor(pl.LightningModule):
         scale = getattr(graph, "feature_normalization_scale", None)
         if mean is None or scale is None:
             return
-        mean_tensor = torch.as_tensor(mean, dtype=torch.float32, device=self.device).view(-1)
-        scale_tensor = torch.as_tensor(scale, dtype=torch.float32, device=self.device).view(-1)
+        mean_tensor = torch.as_tensor(
+            mean, dtype=torch.float32, device=self.device
+        ).view(-1)
+        scale_tensor = torch.as_tensor(
+            scale, dtype=torch.float32, device=self.device
+        ).view(-1)
         if mean_tensor.numel() != scale_tensor.numel():
-            raise ValueError("Feature normalization mean and scale have different lengths.")
+            raise ValueError(
+                "Feature normalization mean and scale have different lengths."
+            )
         if bool((scale_tensor <= 0).any()):
             raise ValueError("Feature normalization scale values must be positive.")
         self.feature_normalization_mean = mean_tensor.detach().clone()
@@ -300,6 +308,7 @@ class GraphAttentionFitnessRegressor(pl.LightningModule):
             lr=self.hparams.learning_rate,
             weight_decay=self.hparams.weight_decay,
         )
+
 
 def attach_graph_attention_predictions(
     landscape: Any,

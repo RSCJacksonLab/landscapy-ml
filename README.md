@@ -82,8 +82,16 @@ predicted = attach_graph_attention_predictions(
 ## Testing
 
 ```bash
+python -m ruff check src tests
+python -m ruff format --check src tests
+python -m pydocstyle src/landscapyml
+python -m pre_commit run --all-files
 python -m pytest
 ```
+
+Ruff is the single formatter, import sorter, and Python linter. Its checked
+rules and formatting policy are defined in `pyproject.toml`; pre-commit and CI
+run the same pinned Ruff and NumPy pydocstyle gates.
 
 The test command measures branch coverage for the complete `landscapyml`
 package, writes `coverage.xml`, and enforces the initial release baseline of

@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -31,7 +30,9 @@ def test_python_documentation_blocks_compile() -> None:
     assert checked > 0
 
 
-def test_readme_python_example_uses_current_api(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_readme_python_example_uses_current_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class NoOpTrainer:
         def fit(self, model, *, datamodule) -> None:
             assert model is not None

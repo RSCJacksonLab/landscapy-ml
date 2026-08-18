@@ -17,15 +17,9 @@ from ._optional import is_missing_optional_dependency
 from .model_registry import (
     _DATA_REGISTRY,
     _MODEL_REGISTRY,
-    DataFactory,
-    ModelFactory,
-    ModelRegistryEntry,
-    build_external_model,
     factory_accepts_kwargs,
     normalize_split_indices,
     register_builtin_components,
-    register_data,
-    register_model,
 )
 
 TrainerFactory = Callable[..., pl.Trainer]
@@ -387,3 +381,6 @@ class TrainingJob:
         if test:
             trainer.test(model, datamodule=dm)
         return trainer, model, dm
+
+
+__all__ = ["TrainingJob", "create_trainer"]

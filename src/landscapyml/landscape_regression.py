@@ -15,8 +15,8 @@ import networkx as nx
 import numpy as np
 from scipy.stats import pearsonr, spearmanr
 
-from .core.inference import infer_fitness_layer_from_landscape
 from .core.data_utils import sequence_composition_features
+from .core.inference import infer_fitness_layer_from_landscape
 from .core.model_registry import _MODEL_REGISTRY
 from .core.trainer import TrainingJob
 
@@ -315,7 +315,9 @@ def run_landscape_regression(
 
     results: list[dict[str, Any]] = []
     for csv_path in csv_paths:
-        output_path = _output_path_for_csv(csv_path, config.model_key, config.output_suffix)
+        output_path = _output_path_for_csv(
+            csv_path, config.model_key, config.output_suffix
+        )
         try:
             result = run_landscape_regression_csv(config, csv_path, output_path)
         except Exception as exc:
@@ -467,8 +469,7 @@ def _read_split_indices(
         )
     if not train:
         raise ValueError(
-            f"No training rows could be inferred from {path} "
-            f"({total} data rows)."
+            f"No training rows could be inferred from {path} ({total} data rows)."
         )
     splits = SplitIndices(train=train, val=val, test=test)
     if splits.counts()["total"] != total:

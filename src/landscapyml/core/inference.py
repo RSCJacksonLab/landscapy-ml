@@ -11,12 +11,8 @@ import torch
 from ._optional import is_missing_optional_dependency
 from .adaptor import (
     LandscapeInputAdapter,
-    ModelAdapter,
     infer_device,
     normalize_adapter_outputs,
-    register_layer_adapter,
-    register_model_adapter,
-    register_model_layer_mapping,
     resolve_input_adapter,
     resolve_model_adapter,
     resolve_output_adapter,
@@ -340,9 +336,7 @@ def infer_fitness_layer_from_landscape(
                 if tensor is None:
                     continue
                 if not torch.is_tensor(tensor):
-                    raise ValueError(
-                        f"Adapter output '{key}' must be a torch.Tensor."
-                    )
+                    raise ValueError(f"Adapter output '{key}' must be a torch.Tensor.")
                 outputs_by_key.setdefault(key, []).append(tensor.detach().cpu())
 
     outputs = {
@@ -352,9 +346,7 @@ def infer_fitness_layer_from_landscape(
     model_meta = getattr(model_adapter, "model", None) or model
     model_type = type(model_meta)
 
-    final_domain, final_model, final_meta = input_adapter_obj.embedding_info(
-        landscape
-    )
+    final_domain, final_model, final_meta = input_adapter_obj.embedding_info(landscape)
     meta = {
         "predicted": True,
         "model_type": model_type.__name__,
@@ -388,3 +380,11 @@ def infer_fitness_layer_from_landscape(
         return layer
 
     return layer
+
+
+__all__ = [
+    "LandscapeInferenceResult",
+    "infer_fitness_layer_from_landscape",
+    "predict_landscape_records",
+    "predict_sequences",
+]

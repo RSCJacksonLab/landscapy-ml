@@ -171,6 +171,7 @@ def make_fitness_target_getter(
     ValueError
         Raised by the returned getter when the requested layer is absent.
     """
+
     def _getter(record: Mapping[str, Any]) -> torch.Tensor:
         fitness = record.get("fitness_tensors")
         if not isinstance(fitness, Mapping) or layer_name not in fitness:
@@ -480,7 +481,9 @@ def aggregate_numeric_targets(
         If ``layer`` is not declared numeric.
     """
     if getattr(layer, "dtype", None) != "numeric":
-        raise ValueError("Landscape graph regression supports numeric fitness layers only.")
+        raise ValueError(
+            "Landscape graph regression supports numeric fitness layers only."
+        )
     if aggregate_func is None:
         values = layer.to_scalar()
     else:
@@ -548,11 +551,15 @@ def feature_normalization_stats(
     if mask is not None:
         mask = torch.as_tensor(mask, dtype=torch.bool, device=features.device)
         if mask.shape[0] != features.shape[0]:
-            raise ValueError("Feature normalization mask length does not match graph nodes.")
+            raise ValueError(
+                "Feature normalization mask length does not match graph nodes."
+            )
         if int(mask.sum().item()) > 0:
             features = features[mask]
     if not bool(torch.isfinite(features).all()):
-        raise ValueError("Cannot normalize graph features containing NaN or Inf values.")
+        raise ValueError(
+            "Cannot normalize graph features containing NaN or Inf values."
+        )
 
     mean = features.mean(dim=0)
     scale = features.std(dim=0, unbiased=False)
@@ -709,7 +716,9 @@ def resolve_split_indices(
     explicit_train = _as_index_tensor(
         train_indices, num_nodes=num_nodes, name="train_indices"
     )
-    explicit_val = _as_index_tensor(val_indices, num_nodes=num_nodes, name="val_indices")
+    explicit_val = _as_index_tensor(
+        val_indices, num_nodes=num_nodes, name="val_indices"
+    )
     explicit_test = _as_index_tensor(
         test_indices, num_nodes=num_nodes, name="test_indices"
     )
@@ -725,7 +734,9 @@ def resolve_split_indices(
             ("test_indices", explicit_test),
         ):
             if idx is not None and idx.numel() and not bool(known_mask[idx].all()):
-                raise ValueError(f"{name} contains indices without finite target values.")
+                raise ValueError(
+                    f"{name} contains indices without finite target values."
+                )
 
         assigned = torch.zeros(num_nodes, dtype=torch.bool)
         for name, idx in (
@@ -741,7 +752,9 @@ def resolve_split_indices(
 
         remaining = known_idx[~assigned[known_idx]]
         train_idx = explicit_train if explicit_train is not None else remaining
-        val_idx = explicit_val if explicit_val is not None else known_idx.new_empty((0,))
+        val_idx = (
+            explicit_val if explicit_val is not None else known_idx.new_empty((0,))
+        )
         test_idx = (
             explicit_test if explicit_test is not None else known_idx.new_empty((0,))
         )
@@ -764,7 +777,9 @@ def resolve_split_indices(
             test_idx = sampled
 
         if train_idx.numel() <= 0:
-            raise ValueError("At least one finite target must be available for training.")
+            raise ValueError(
+                "At least one finite target must be available for training."
+            )
         return train_idx, val_idx, test_idx
 
     generator = torch.Generator()
