@@ -1,3 +1,5 @@
+"""End-to-end CSV workflows for landscape regression examples."""
+
 from __future__ import annotations
 
 import csv
@@ -20,11 +22,35 @@ from .core.trainer import TrainingJob
 
 @dataclass(frozen=True)
 class SplitIndices:
+    """Store canonical node positions for supervised data splits.
+
+    Parameters
+    ----------
+    train : list of int, optional
+        Training node positions.
+    val : list of int, optional
+        Validation node positions.
+    test : list of int, optional
+        Test node positions.
+
+    Attributes
+    ----------
+    train, val, test : list of int
+        Node positions for each split.
+    """
+
     train: list[int] = field(default_factory=list)
     val: list[int] = field(default_factory=list)
     test: list[int] = field(default_factory=list)
 
     def as_mapping(self) -> dict[str, list[int]]:
+        """Return defensive list copies keyed by split name.
+
+        Returns
+        -------
+        dict of str to list of int
+            ``train``, ``val``, and ``test`` node positions.
+        """
         return {
             "train": list(self.train),
             "val": list(self.val),
@@ -32,6 +58,13 @@ class SplitIndices:
         }
 
     def counts(self) -> dict[str, int]:
+        """Return the number of rows assigned to each split.
+
+        Returns
+        -------
+        dict of str to int
+            Counts for ``train``, ``val``, and ``test``.
+        """
         return {
             "train": len(self.train),
             "val": len(self.val),
@@ -41,6 +74,62 @@ class SplitIndices:
 
 @dataclass(frozen=True)
 class LandscapeRegressionConfig:
+    """Configure CSV landscape construction, fitting, and output.
+
+    Parameters
+    ----------
+    model_key : str
+        Registered Lightning model or custom landscape-runner key.
+    csv_paths : sequence of pathlib.Path, optional
+        Explicit CSV or compressed CSV inputs.
+    demo_root : pathlib.Path or None, optional
+        Root searched for ``dataset/split/*.csv`` inputs.
+    sequence_column : str, default="sequence"
+        Input sequence column.
+    target_column : str, default="target"
+        Numeric fitness column.
+    split_column : str, default="set"
+        Column containing train and test labels.
+    validation_column : str, default="validation"
+        Boolean validation indicator column.
+    train_label : str, default="train"
+        Training value in ``split_column``.
+    test_label : str, default="test"
+        Test value in ``split_column``.
+    data_name : str, default="landscape_graph_regression"
+        Registered data-builder key for Lightning models.
+    output_suffix : str, default="results"
+        Suffix for output JSON paths.
+    seed : int or None, optional
+        Random seed for splitting and training.
+    max_epochs : int, default=50
+        Maximum Lightning training epochs.
+    accelerator : str or None, default="auto"
+        Lightning accelerator selection.
+    devices : int, str, or None, default=1
+        Lightning device selection.
+    model_kwargs : mapping, optional
+        Model-factory keyword arguments.
+    data_kwargs : mapping, optional
+        Data-builder keyword arguments.
+    trainer_kwargs : mapping, optional
+        Trainer keyword overrides.
+    fit_kwargs : mapping, optional
+        Custom non-Lightning runner fit arguments.
+    tokenizer : Any, str, or None, optional
+        Tokenizer passed to graph conversion.
+    moltype : str or None, default="protein"
+        Landscapy sequence molecular type.
+    continue_on_error : bool, default=False
+        Record per-file errors and continue rather than raising immediately.
+
+    Notes
+    -----
+    Graph selection performed by this legacy example runner is recorded in
+    each result. It is a modeling choice and should not be interpreted as
+    biological validation of the selected representation.
+    """
+
     model_key: str
     csv_paths: Sequence[Path] = field(default_factory=tuple)
     demo_root: Path | None = None
@@ -67,6 +156,26 @@ class LandscapeRegressionConfig:
 
 @dataclass
 class LandscapeRegressionContext:
+    """Bundle prepared inputs passed to a landscape regression runner.
+
+    Parameters
+    ----------
+    config : LandscapeRegressionConfig
+        Shared workflow configuration.
+    csv_path : pathlib.Path
+        Current source dataset.
+    output_path : pathlib.Path
+        JSON result destination.
+    landscape : Any
+        Prepared Landscapy fitness landscape.
+    graph_info : dict of str to Any
+        Recorded graph construction and component summary.
+    splits : SplitIndices
+        Canonical supervised node positions.
+    target_values : numpy.ndarray
+        One-dimensional numeric targets aligned with landscape sequence order.
+    """
+
     config: LandscapeRegressionConfig
     csv_path: Path
     output_path: Path
@@ -86,22 +195,59 @@ def register_landscape_regression_runner(
     *,
     overwrite: bool = False,
 ) -> None:
+    """Register an end-to-end landscape regression runner.
+
+    Parameters
+    ----------
+    name : str
+        Process-local runner key.
+    runner : callable
+        Function accepting ``LandscapeRegressionContext`` and returning a
+        JSON-serializable result mapping.
+    overwrite : bool, default=False
+        Replace an existing runner.
+
+    Returns
+    -------
+    None
+        The process-local runner registry is mutated.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` exists and ``overwrite`` is false.
+    """
     if name in _LANDSCAPE_REGRESSION_RUNNERS and not overwrite:
         raise ValueError(f"Landscape regression runner {name!r} is already registered.")
     _LANDSCAPE_REGRESSION_RUNNERS[name] = runner
 
 
 def available_landscape_regression_runners() -> list[str]:
+    """Return registered landscape-runner names.
+
+    Returns
+    -------
+    list of str
+        Registry keys in lexical order.
+    """
     return sorted(_LANDSCAPE_REGRESSION_RUNNERS)
 
 
 def import_builtin_examples() -> None:
-    """
-    Import bundled examples for their registry side effects.
+    """Import bundled examples for their registry side effects.
 
     Optional dependencies remain lazy inside the examples where possible.
-    """
 
+    Returns
+    -------
+    None
+        Bundled example modules are imported.
+
+    Notes
+    -----
+    Importing registers example models, adapters, data builders, and custom
+    landscape runners in process-local registries.
+    """
     for module_name in (
         "landscapyml.examples.gat_fitness",
         "landscapyml.examples.gp_fitness",
@@ -110,6 +256,18 @@ def import_builtin_examples() -> None:
 
 
 def discover_demo_csvs(demo_root: Path) -> list[Path]:
+    """Discover two-level nested CSV inputs beneath a demo root.
+
+    Parameters
+    ----------
+    demo_root : pathlib.Path
+        Root searched with ``*/*/*.csv`` and ``*/*/*.csv.gz`` patterns.
+
+    Returns
+    -------
+    list of pathlib.Path
+        Existing files in lexical order.
+    """
     patterns = ("*.csv", "*.csv.gz")
     paths: list[Path] = []
     for pattern in patterns:
@@ -120,6 +278,30 @@ def discover_demo_csvs(demo_root: Path) -> list[Path]:
 def run_landscape_regression(
     config: LandscapeRegressionConfig,
 ) -> list[dict[str, Any]]:
+    """Run one configured regression workflow across selected CSV files.
+
+    Parameters
+    ----------
+    config : LandscapeRegressionConfig
+        Dataset discovery, landscape construction, model, and output settings.
+
+    Returns
+    -------
+    list of dict
+        One result mapping per unique resolved CSV path.
+
+    Raises
+    ------
+    ValueError
+        If no CSV input is supplied or discovered.
+    Exception
+        Propagates per-file failures unless ``continue_on_error`` is true.
+
+    Notes
+    -----
+    Each successful or captured-error result is written to JSON beside its
+    source CSV. The workflow imports bundled examples for registry side effects.
+    """
     import_builtin_examples()
     csv_paths = [Path(path) for path in config.csv_paths]
     if config.demo_root is not None:
@@ -153,6 +335,41 @@ def run_landscape_regression_csv(
     csv_path: Path,
     output_path: Path | None = None,
 ) -> dict[str, Any]:
+    """Prepare, fit, evaluate, and record one CSV regression task.
+
+    Parameters
+    ----------
+    config : LandscapeRegressionConfig
+        Workflow settings.
+    csv_path : pathlib.Path
+        CSV or compressed CSV dataset.
+    output_path : pathlib.Path or None, optional
+        Explicit result path. A deterministic sibling path is generated when
+        omitted.
+
+    Returns
+    -------
+    dict of str to Any
+        Runner result written to ``output_path``.
+
+    Raises
+    ------
+    ImportError
+        If required Landscapy, model, or optional runner dependencies are
+        unavailable.
+    RuntimeError
+        If the selected fallback graph is disconnected.
+    ValueError
+        If CSV schema, graph construction, splits, or model selection is
+        invalid.
+
+    Notes
+    -----
+    The legacy helper requests a Hamming graph and may substitute a k-nearest
+    neighbor graph to force connectivity. The result's ``graph`` field records
+    the representation actually used; callers must treat that substitution as
+    a scientific modeling choice.
+    """
     output_path = output_path or _output_path_for_csv(
         csv_path,
         config.model_key,

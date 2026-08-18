@@ -40,7 +40,9 @@ dev = [
   "build>=1.2",
   "flake8>=7.0",
   "isort>=5.13",
+  "numpydoc>=1.7",
   "pre-commit>=3.7",
+  "pydocstyle>=6.3",
   "pytest>=8.0",
   "pytest-cov>=6.0",
   "pytest-mock>=3.14",
@@ -73,6 +75,9 @@ include = '\.pyi?$'
 [tool.isort]
 profile = "black"
 multi_line_output = 3
+
+[tool.pydocstyle]
+convention = "numpy"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

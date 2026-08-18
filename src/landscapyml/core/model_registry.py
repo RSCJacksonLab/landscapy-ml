@@ -1,3 +1,5 @@
+"""Process-local registries for Lightning models and landscape data builders."""
+
 from __future__ import annotations
 
 import importlib
@@ -27,6 +29,23 @@ _SPLIT_INDEX_ALIASES: dict[str, str] = {
 
 @dataclass(frozen=True)
 class ModelRegistryEntry:
+    """Describe a registered Lightning model factory.
+
+    Parameters
+    ----------
+    factory : callable
+        Factory returning a Lightning module.
+    requires_num_features : bool, default=True
+        Whether ``TrainingJob`` should infer and inject ``num_features``.
+
+    Attributes
+    ----------
+    factory : callable
+        Registered model factory.
+    requires_num_features : bool
+        Automatic feature-width injection policy.
+    """
+
     factory: ModelFactory
     requires_num_features: bool = True
 
@@ -39,10 +58,24 @@ _BUILTINS_REGISTERED = False
 def normalize_split_indices(
     split_indices: Mapping[str, Sequence[int]] | None,
 ) -> dict[str, list[int]]:
-    """
-    Normalize common split names to data-builder keyword arguments.
-    """
+    """Normalize split aliases to data-builder keyword arguments.
 
+    Parameters
+    ----------
+    split_indices : mapping of str to sequence of int or None
+        Optional split mapping using train, validation, or test aliases.
+
+    Returns
+    -------
+    dict of str to list of int
+        Canonical ``train_indices``, ``val_indices``, and ``test_indices``
+        entries for supplied splits.
+
+    Raises
+    ------
+    ValueError
+        If a split name is unknown or aliases provide the same split twice.
+    """
     if split_indices is None:
         return {}
 
@@ -63,6 +96,21 @@ def normalize_split_indices(
 
 
 def factory_accepts_kwargs(factory: Callable[..., Any], names: Sequence[str]) -> bool:
+    """Check whether a factory signature accepts named keyword arguments.
+
+    Parameters
+    ----------
+    factory : callable
+        Callable inspected with :func:`inspect.signature`.
+    names : sequence of str
+        Keyword parameter names required by the caller.
+
+    Returns
+    -------
+    bool
+        ``True`` when every name is explicit or the factory accepts arbitrary
+        keyword arguments. Uninspectable callables return ``False``.
+    """
     try:
         signature = inspect.signature(factory)
     except (TypeError, ValueError):
@@ -80,6 +128,29 @@ def register_model(
     overwrite: bool = False,
     requires_num_features: bool = True,
 ) -> None:
+    """Register a Lightning model factory.
+
+    Parameters
+    ----------
+    name : str
+        Process-local registry key.
+    factory : callable
+        Factory returning a Lightning module.
+    overwrite : bool, default=False
+        Replace an existing entry.
+    requires_num_features : bool, default=True
+        Request automatic ``num_features`` injection by ``TrainingJob``.
+
+    Returns
+    -------
+    None
+        The model registry is mutated.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` exists and ``overwrite`` is false.
+    """
     if name in _MODEL_REGISTRY and not overwrite:
         raise ValueError(f"Model '{name}' is already registered.")
     _MODEL_REGISTRY[name] = ModelRegistryEntry(
@@ -88,24 +159,93 @@ def register_model(
 
 
 def register_data(name: str, factory: DataFactory, *, overwrite: bool = False) -> None:
+    """Register a Lightning data-module factory.
+
+    Parameters
+    ----------
+    name : str
+        Process-local registry key.
+    factory : callable
+        Factory returning a Lightning data module.
+    overwrite : bool, default=False
+        Replace an existing entry.
+
+    Returns
+    -------
+    None
+        The data registry is mutated.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` exists and ``overwrite`` is false.
+    """
     if name in _DATA_REGISTRY and not overwrite:
         raise ValueError(f"Data builder '{name}' is already registered.")
     _DATA_REGISTRY[name] = factory
 
 
 def available_models() -> list[str]:
+    """Return registered model names.
+
+    Returns
+    -------
+    list of str
+        Registry keys in lexical order.
+    """
     return sorted(_MODEL_REGISTRY)
 
 
 def available_data_builders() -> list[str]:
+    """Return registered data-builder names.
+
+    Returns
+    -------
+    list of str
+        Registry keys in lexical order.
+    """
     return sorted(_DATA_REGISTRY)
 
 
 def get_model_entry(name: str) -> ModelRegistryEntry:
+    """Return one registered model entry.
+
+    Parameters
+    ----------
+    name : str
+        Registry key.
+
+    Returns
+    -------
+    ModelRegistryEntry
+        Registered model factory and feature-width policy.
+
+    Raises
+    ------
+    KeyError
+        If ``name`` is not registered.
+    """
     return _MODEL_REGISTRY[name]
 
 
 def get_data_factory(name: str) -> DataFactory:
+    """Return one registered data-module factory.
+
+    Parameters
+    ----------
+    name : str
+        Registry key.
+
+    Returns
+    -------
+    callable
+        Registered data-module factory.
+
+    Raises
+    ------
+    KeyError
+        If ``name`` is not registered.
+    """
     return _DATA_REGISTRY[name]
 
 
@@ -132,10 +272,39 @@ def build_external_model(
     adapter_kwargs: Optional[dict[str, Any]] = None,
     **extra_kwargs: Any,
 ) -> pl.LightningModule:
-    """
-    Instantiate a LightningModule from a class path, with optional wrapping.
-    """
+    """Instantiate a Lightning module from an import path.
 
+    Parameters
+    ----------
+    class_path : str
+        Fully qualified model class or factory path.
+    init_args : sequence of Any or None, optional
+        Positional arguments for the target constructor.
+    init_kwargs : dict of str to Any or None, optional
+        Keyword arguments for the target constructor.
+    adapter_path : str or None, optional
+        Fully qualified adapter callable used to wrap the constructed model.
+    adapter_args : sequence of Any or None, optional
+        Positional arguments following the wrapped model.
+    adapter_kwargs : dict of str to Any or None, optional
+        Keyword arguments for the adapter callable.
+    **extra_kwargs : Any
+        Additional target-constructor keywords, overriding ``init_kwargs``.
+
+    Returns
+    -------
+    pytorch_lightning.LightningModule
+        Constructed model or adapter-wrapped model.
+
+    Raises
+    ------
+    ImportError
+        If an import path cannot be resolved.
+    TypeError
+        If the final object is not a Lightning module.
+    ValueError
+        If an import path is not fully qualified.
+    """
     target = _load_object(class_path)
     args = list(init_args) if init_args is not None else []
     kwargs = dict(init_kwargs or {})
@@ -157,14 +326,22 @@ def build_external_model(
 
 
 def register_builtin_components() -> None:
-    """
-    Register the small built-in models and landscapy data builders.
+    """Register built-in models and landscape data builders once.
 
     The registry remains functional and explicit: custom projects can import
     this module, register their own factories, and use those names through the
     CLI or ``TrainingJob``.
-    """
 
+    Returns
+    -------
+    None
+        The process-local registries are populated idempotently.
+
+    Notes
+    -----
+    Registration occurs at module import. Built-ins use ``overwrite=True`` so
+    the initial import establishes deterministic definitions.
+    """
     global _BUILTINS_REGISTERED
     if _BUILTINS_REGISTERED:
         return

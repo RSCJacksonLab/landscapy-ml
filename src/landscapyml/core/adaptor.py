@@ -1,3 +1,5 @@
+"""Registries and adapters connecting Landscapy objects to PyTorch models."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -42,6 +44,22 @@ DEFAULT_EMBEDDING_MODEL = "facebook/esm2_t6_8M_UR50D"
 def resolve_embedding_info(
     landscape: Any,
 ) -> Tuple[Optional[str], Optional[str], Optional[Mapping[str, Any]]]:
+    """Read active embedding provenance from a landscape.
+
+    Parameters
+    ----------
+    landscape : Any
+        Object exposing Landscapy embedding attributes or metadata accessors.
+
+    Returns
+    -------
+    domain : str or None
+        Active embedding domain.
+    model_name : str or None
+        Embedding model identifier from metadata or the legacy attribute.
+    metadata : mapping or None
+        Active-domain embedding metadata. The mapping is not copied.
+    """
     domain = getattr(
         landscape,
         "active_embedding_domain",
@@ -60,13 +78,56 @@ def resolve_embedding_info(
 
 @runtime_checkable
 class ModelAdapter(Protocol):
+    """Define the minimal inference interface consumed by landscapy-ml.
+
+    Attributes
+    ----------
+    layer_kind : str
+        Logical output kind resolved through the output-adapter registry.
+    """
+
     layer_kind: str
 
     def predict(self, inputs: Any) -> Mapping[str, torch.Tensor] | torch.Tensor:
+        """Return model predictions for one input batch.
+
+        Parameters
+        ----------
+        inputs : Any
+            Model-specific batch produced by a landscape input adapter.
+
+        Returns
+        -------
+        mapping of str to torch.Tensor or torch.Tensor
+            Named or unnamed prediction tensors. Tensors may reside on the
+            model device and may require gradients.
+        """
         ...
 
 
 class DefaultModelAdapter:
+    """Normalize conventional model prediction methods.
+
+    Parameters
+    ----------
+    model : Any
+        Callable model or object implementing ``predict`` or
+        ``predict_with_uncertainty``.
+    layer_kind : str
+        Logical output kind used to normalize return keys.
+
+    Attributes
+    ----------
+    model : Any
+        Wrapped model.
+    layer_kind : str
+        Logical output kind.
+    embedding_domain : str or None
+        Optional embedding domain declared by the model.
+    embedding_model : str or None
+        Optional embedding model identifier declared by the model.
+    """
+
     def __init__(self, model: Any, layer_kind: str) -> None:
         self.model = model
         self.layer_kind = layer_kind
@@ -74,15 +135,42 @@ class DefaultModelAdapter:
         self.embedding_model = getattr(model, "embedding_model", None)
 
     def eval(self) -> None:
+        """Place the wrapped model in evaluation mode when supported."""
         if hasattr(self.model, "eval"):
             self.model.eval()
 
     def to(self, device: torch.device | str) -> "DefaultModelAdapter":
+        """Move the wrapped model to a device when supported.
+
+        Parameters
+        ----------
+        device : torch.device or str
+            Target PyTorch device.
+
+        Returns
+        -------
+        DefaultModelAdapter
+            This adapter for method chaining.
+        """
         if hasattr(self.model, "to"):
             self.model.to(device)
         return self
 
     def predict(self, inputs: Any) -> Mapping[str, torch.Tensor] | torch.Tensor:
+        """Run the wrapped model and normalize conventional output keys.
+
+        Parameters
+        ----------
+        inputs : Any
+            Model-specific input batch.
+
+        Returns
+        -------
+        mapping of str to torch.Tensor or torch.Tensor
+            ``mean`` and optional ``var`` for probabilistic categorical
+            outputs, or ``output`` for ordinary predictions. Existing mappings
+            pass through unchanged.
+        """
         if self.layer_kind == "prob_categorical":
             if hasattr(self.model, "predict_with_uncertainty"):
                 mean, var = self.model.predict_with_uncertainty(inputs)
@@ -113,6 +201,32 @@ _MODEL_TO_LAYER: dict[Type[Any], str] = {}
 def register_model_adapter(
     model_cls: Type[Any], adapter_factory: ModelAdapterFactory, *, overwrite: bool = False
 ) -> None:
+    """Register a model-adapter factory for a model class.
+
+    Parameters
+    ----------
+    model_cls : type
+        Model class used as the registry key.
+    adapter_factory : callable
+        Factory accepting a model instance and returning a ``ModelAdapter``.
+    overwrite : bool, default=False
+        Replace an existing exact-class registration.
+
+    Returns
+    -------
+    None
+        The process-local registry is mutated.
+
+    Raises
+    ------
+    ValueError
+        If ``model_cls`` is registered and ``overwrite`` is false.
+
+    Notes
+    -----
+    Resolution follows Python method resolution order. Adapter factories take
+    precedence over model-to-layer mappings.
+    """
     if model_cls in _MODEL_ADAPTERS and not overwrite:
         raise ValueError(
             f"Adapter for model class {model_cls.__name__} already registered."
@@ -123,6 +237,32 @@ def register_model_adapter(
 def register_model_layer_mapping(
     model_cls: Type[Any], layer_kind: str, *, overwrite: bool = False
 ) -> None:
+    """Map a model class to a logical output-layer kind.
+
+    Parameters
+    ----------
+    model_cls : type
+        Model class used as the registry key.
+    layer_kind : str
+        Key resolved through the output-adapter registry.
+    overwrite : bool, default=False
+        Replace an existing exact-class mapping.
+
+    Returns
+    -------
+    None
+        The process-local registry is mutated.
+
+    Raises
+    ------
+    ValueError
+        If ``model_cls`` is mapped and ``overwrite`` is false.
+
+    Notes
+    -----
+    Subclasses inherit mappings according to Python method resolution order;
+    an exact subclass mapping has priority over base-class mappings.
+    """
     if model_cls in _MODEL_TO_LAYER and not overwrite:
         raise ValueError(
             f"Model {model_cls.__name__} already mapped to {_MODEL_TO_LAYER[model_cls]!r}."
@@ -131,6 +271,24 @@ def register_model_layer_mapping(
 
 
 def resolve_model_adapter(model: Any) -> ModelAdapter:
+    """Resolve a model instance to the inference adapter protocol.
+
+    Parameters
+    ----------
+    model : Any
+        Model adapter, registered model instance, or model declaring
+        ``layer_kind``.
+
+    Returns
+    -------
+    ModelAdapter
+        Supplied adapter, registered custom adapter, or default wrapper.
+
+    Raises
+    ------
+    ValueError
+        If no adapter or output-layer mapping supports the model class.
+    """
     if isinstance(model, ModelAdapter):
         return model
     model_type = type(model)
@@ -152,6 +310,19 @@ def resolve_model_adapter(model: Any) -> ModelAdapter:
 
 
 def infer_device(model: Any) -> Optional[torch.device]:
+    """Infer a PyTorch device from a model-like object.
+
+    Parameters
+    ----------
+    model : Any
+        Object with an optional ``device`` attribute or parameter iterator.
+
+    Returns
+    -------
+    torch.device or None
+        Explicit device, first-parameter device, or ``None`` for an absent or
+        parameterless model.
+    """
     if model is None:
         return None
     device = getattr(model, "device", None)
@@ -171,6 +342,26 @@ def infer_device(model: Any) -> Optional[torch.device]:
 def normalize_adapter_outputs(
     outputs: Any, layer_kind: str
 ) -> Mapping[str, torch.Tensor]:
+    """Normalize adapter outputs to a named tensor mapping.
+
+    Parameters
+    ----------
+    outputs : Any
+        Existing mapping, tensor, or supported tuple/list output.
+    layer_kind : str
+        Logical layer kind. ``prob_categorical`` tensors use the ``mean`` key
+        and two-element sequences use ``mean`` and ``var``.
+
+    Returns
+    -------
+    mapping of str to torch.Tensor
+        Normalized output mapping without tensor copies or device transfers.
+
+    Raises
+    ------
+    ValueError
+        If ``outputs`` has no supported representation.
+    """
     if isinstance(outputs, Mapping):
         return outputs
     if torch.is_tensor(outputs):
@@ -197,6 +388,24 @@ def _extract_label_mapping(layer: Any) -> Optional[list[str]]:
 
 @dataclass(frozen=True)
 class LandscapeExport:
+    """Store task-agnostic landscape records and categorical labels.
+
+    Parameters
+    ----------
+    records : list of dict
+        Per-sequence ML records aligned with landscape sequence order.
+    fitness_mappings : dict of str to list of str or None
+        Category order for each exported fitness field, or ``None`` for
+        non-categorical fields.
+
+    Attributes
+    ----------
+    records : list of dict
+        Exported records.
+    fitness_mappings : dict of str to list of str or None
+        Exported categorical label mappings.
+    """
+
     records: list[LandscapeRecord]
     fitness_mappings: dict[str, Optional[list[str]]]
 
@@ -224,10 +433,44 @@ def export_landscape_records(
     sequence_idx: Optional[Sequence[int]] = None,
     sequence: Optional[Sequence[str] | str] = None,
 ) -> LandscapeExport:
-    """
-    Export a ``FitnessLandscape`` into task-agnostic ML record dictionaries.
-    """
+    """Export a fitness landscape into task-agnostic ML records.
 
+    Parameters
+    ----------
+    landscape : Any
+        Landscapy object implementing ``to_sequence_tensors``.
+    fitness_layers : sequence of str or None, optional
+        Fitness layers to include. ``None`` selects every layer returned by
+        the first record.
+    rename_fitness : mapping of str to str or None, optional
+        Source-to-exported fitness key mapping.
+    feature_view : str, default="auto"
+        Feature representation forwarded to Landscapy.
+    include_embeddings : bool, default=True
+        Include active embeddings in exported records when available.
+    tokenizer : Any, str, or None, optional
+        Tokenizer forwarded to Landscapy tensor export.
+    sequence_idx : sequence of int or None, optional
+        Canonical sequence positions to export.
+    sequence : sequence of str, str, or None, optional
+        Sequence identifiers or values to export.
+
+    Returns
+    -------
+    LandscapeExport
+        Records plus category-order metadata for selected fitness layers.
+
+    Raises
+    ------
+    ValueError
+        If the landscape lacks tensor export, returns malformed records, or
+        omits a requested fitness layer.
+
+    Notes
+    -----
+    Record tensors are retained by reference; the top-level records and their
+    ``fitness_tensors`` mappings are copied.
+    """
     if not hasattr(landscape, "to_sequence_tensors"):
         raise ValueError("Landscape must implement to_sequence_tensors.")
 
@@ -288,14 +531,50 @@ def export_landscape_records(
 
 
 class LandscapeInputAdapter(ABC):
+    """Define extraction and device transfer for landscape model inputs.
+
+    Attributes
+    ----------
+    name : str
+        Registry key and metadata identifier for the adapter.
+    """
+
     name: str = "input_adapter"
 
     def metadata(self, landscape: Any) -> Mapping[str, Any]:
+        """Describe the input representation used for inference.
+
+        Parameters
+        ----------
+        landscape : Any
+            Source landscape.
+
+        Returns
+        -------
+        mapping of str to Any
+            Metadata suitable for attaching to the predicted fitness layer.
+        """
         return {"input_adapter": self.name}
 
     def embedding_info(
         self, landscape: Any
     ) -> Tuple[Optional[str], Optional[str], Optional[Mapping[str, Any]]]:
+        """Return embedding provenance required by the adapter.
+
+        Parameters
+        ----------
+        landscape : Any
+            Source landscape.
+
+        Returns
+        -------
+        domain : str or None
+            Active embedding domain, if relevant.
+        model_name : str or None
+            Embedding model identifier, if relevant.
+        metadata : mapping or None
+            Embedding provenance mapping, if relevant.
+        """
         return None, None, None
 
     @abstractmethod
@@ -308,16 +587,64 @@ class LandscapeInputAdapter(ABC):
         device: Optional[torch.device] = None,
         **kwargs: Any,
     ) -> Iterable[Any]:
+        """Yield model-specific batches from a landscape.
+
+        Parameters
+        ----------
+        landscape : Any
+            Source landscape.
+        batch_size : int
+            Requested number of records per batch.
+        num_workers : int, default=0
+            Worker-process count for adapters backed by DataLoader.
+        device : torch.device or None, optional
+            Intended model device.
+        **kwargs : Any
+            Adapter-specific extraction options.
+
+        Yields
+        ------
+        Any
+            Raw adapter-specific batches.
+        """
         ...
 
     @abstractmethod
     def to_model_inputs(
         self, batch: Any, *, device: Optional[torch.device] = None
     ) -> Any:
+        """Convert a raw adapter batch into model inputs.
+
+        Parameters
+        ----------
+        batch : Any
+            Raw batch yielded by :meth:`iter_batches`.
+        device : torch.device or None, optional
+            Target model device.
+
+        Returns
+        -------
+        Any
+            Model-ready input object.
+        """
         ...
 
 
 class EmbeddingInputAdapter(LandscapeInputAdapter):
+    """Batch a landscape's active floating-point embedding matrix.
+
+    Parameters
+    ----------
+    default_model_name : str, default=DEFAULT_EMBEDDING_MODEL
+        Model used for automatic PLM embedding when the landscape has no
+        cached active embedding.
+
+    Attributes
+    ----------
+    default_model_name : str
+        Automatic embedding model identifier.
+    """
+
     name = "embedding"
 
     def __init__(self, *, default_model_name: str = DEFAULT_EMBEDDING_MODEL) -> None:
@@ -326,9 +653,37 @@ class EmbeddingInputAdapter(LandscapeInputAdapter):
     def embedding_info(
         self, landscape: Any
     ) -> Tuple[Optional[str], Optional[str], Optional[Mapping[str, Any]]]:
+        """Return active embedding domain, model, and metadata.
+
+        Parameters
+        ----------
+        landscape : Any
+            Source landscape.
+
+        Returns
+        -------
+        domain : str or None
+            Active embedding domain.
+        model_name : str or None
+            Active embedding model identifier.
+        metadata : mapping or None
+            Active embedding provenance.
+        """
         return resolve_embedding_info(landscape)
 
     def metadata(self, landscape: Any) -> Mapping[str, Any]:
+        """Build predicted-layer metadata for the active embeddings.
+
+        Parameters
+        ----------
+        landscape : Any
+            Source landscape.
+
+        Returns
+        -------
+        mapping of str to Any
+            Adapter name and available embedding domain, model, and mode.
+        """
         domain, model_name, meta = self.embedding_info(landscape)
         info: dict[str, Any] = {"input_adapter": self.name}
         if domain is not None:
@@ -349,6 +704,41 @@ class EmbeddingInputAdapter(LandscapeInputAdapter):
         model_name: Optional[str] = None,
         **kwargs: Any,
     ) -> Iterable[Any]:
+        """Yield ``float32`` embedding batches on their source device.
+
+        Parameters
+        ----------
+        landscape : Any
+            Landscape implementing ``get_embedding`` and optionally
+            ``compute_plm_embeddings``.
+        batch_size : int
+            Number of embedding rows per batch.
+        num_workers : int, default=0
+            DataLoader worker-process count.
+        device : torch.device or None, optional
+            Accepted for the common interface; transfer occurs in
+            :meth:`to_model_inputs`.
+        model_name : str or None, optional
+            PLM identifier used only for automatic embedding.
+        **kwargs : Any
+            Ignored compatibility options.
+
+        Yields
+        ------
+        tuple of torch.Tensor
+            Single-item DataLoader batches with shape
+            ``(batch, embedding_dim)`` and dtype ``float32``.
+
+        Raises
+        ------
+        RuntimeError
+            If embeddings are unavailable and cannot be computed.
+
+        Notes
+        -----
+        Automatic embedding mutates the source landscape by caching the
+        computed PLM embedding.
+        """
         emb_array = landscape.get_embedding()
         if emb_array is None:
             fallback_model = None
@@ -377,6 +767,20 @@ class EmbeddingInputAdapter(LandscapeInputAdapter):
     def to_model_inputs(
         self, batch: Any, *, device: Optional[torch.device] = None
     ) -> Any:
+        """Extract an embedding tensor and optionally move it to a device.
+
+        Parameters
+        ----------
+        batch : Any
+            DataLoader tuple/list or tensor batch.
+        device : torch.device or None, optional
+            Target device. ``None`` preserves the current device.
+
+        Returns
+        -------
+        Any
+            Tensor input when recognized, otherwise the batch value unchanged.
+        """
         if isinstance(batch, (tuple, list)):
             inputs = batch[0]
         else:
@@ -387,8 +791,23 @@ class EmbeddingInputAdapter(LandscapeInputAdapter):
 
 
 class GraphTensorInputAdapter(LandscapeInputAdapter):
-    """
-    Generic adapter for models that consume ``landscape.to_graph_tensor()``.
+    """Adapt a complete landscape graph to a graph-native model.
+
+    Parameters
+    ----------
+    tokenizer : Any, str, or None, optional
+        Tokenizer forwarded to ``landscape.to_graph_tensor``.
+
+    Attributes
+    ----------
+    tokenizer : Any, str, or None
+        Configured graph-export tokenizer.
+
+    Notes
+    -----
+    The full graph is yielded once; ``batch_size`` does not partition nodes.
+    Variable-length tensor-export failures fall back to graph edges plus active
+    embeddings or sequence-composition features.
     """
 
     name = "graph_tensor"
@@ -397,6 +816,18 @@ class GraphTensorInputAdapter(LandscapeInputAdapter):
         self.tokenizer = tokenizer
 
     def metadata(self, landscape: Any) -> Mapping[str, Any]:  # noqa: ARG002
+        """Describe graph-tensor input provenance.
+
+        Parameters
+        ----------
+        landscape : Any
+            Source landscape; accepted for the common adapter interface.
+
+        Returns
+        -------
+        mapping of str to Any
+            Graph-input marker and optional tokenizer identifier.
+        """
         info = {"input_adapter": self.name, "graph_tensor": True}
         if self.tokenizer is not None:
             info["tokenizer"] = str(self.tokenizer)
@@ -411,6 +842,36 @@ class GraphTensorInputAdapter(LandscapeInputAdapter):
         device: Optional[torch.device] = None,  # noqa: ARG002
         **kwargs: Any,  # noqa: ARG002
     ) -> Iterable[Any]:
+        """Yield the complete exported landscape graph once.
+
+        Parameters
+        ----------
+        landscape : Any
+            Landscape exposing ``to_graph_tensor`` or a graph and sequences.
+        batch_size : int
+            Accepted for interface compatibility and otherwise ignored.
+        num_workers : int, default=0
+            Accepted for interface compatibility and otherwise ignored.
+        device : torch.device or None, optional
+            Accepted for interface compatibility; transfer occurs later.
+        **kwargs : Any
+            Ignored compatibility options.
+
+        Yields
+        ------
+        Any
+            Full PyTorch Geometric-style graph object.
+
+        Raises
+        ------
+        ImportError
+            If fallback graph conversion requires PyTorch Geometric.
+        RuntimeError
+            If no graph export or fallback graph is available.
+        ValueError
+            If native graph export fails for a reason other than the supported
+            variable-length fallback.
+        """
         if hasattr(landscape, "to_graph_tensor"):
             try:
                 yield landscape.to_graph_tensor(tokenizer=self.tokenizer)
@@ -428,19 +889,50 @@ class GraphTensorInputAdapter(LandscapeInputAdapter):
     def to_model_inputs(
         self, batch: Any, *, device: Optional[torch.device] = None
     ) -> Any:
+        """Move a graph batch to the requested device when supported.
+
+        Parameters
+        ----------
+        batch : Any
+            Graph-like object.
+        device : torch.device or None, optional
+            Target device.
+
+        Returns
+        -------
+        Any
+            Device-mapped graph, or the original object when transfer is not
+            supported or requested.
+        """
         if device is not None and hasattr(batch, "to"):
             return batch.to(device)
         return batch
 
 
 class NodeIndexInputAdapter(LandscapeInputAdapter):
-    """
-    Generic adapter that exposes a landscape as batches of node indices.
+    """Expose canonical landscape node positions as model inputs.
+
+    Notes
+    -----
+    Indices are emitted as ``float32`` column tensors with shape
+    ``(batch, 1)`` for compatibility with GP model inputs.
     """
 
     name = "node_index"
 
     def metadata(self, landscape: Any) -> Mapping[str, Any]:  # noqa: ARG002
+        """Describe node-index input provenance.
+
+        Parameters
+        ----------
+        landscape : Any
+            Source landscape; accepted for interface consistency.
+
+        Returns
+        -------
+        mapping of str to Any
+            Adapter name and graph-node-index marker.
+        """
         return {
             "input_adapter": self.name,
             "graph_node_index": True,
@@ -455,6 +947,31 @@ class NodeIndexInputAdapter(LandscapeInputAdapter):
         device: Optional[torch.device] = None,  # noqa: ARG002
         **kwargs: Any,  # noqa: ARG002
     ) -> Iterable[Any]:
+        """Yield canonical node-index batches.
+
+        Parameters
+        ----------
+        landscape : Any
+            Landscape exposing ``sequences`` or a length.
+        batch_size : int
+            Number of node positions per batch.
+        num_workers : int, default=0
+            DataLoader worker-process count.
+        device : torch.device or None, optional
+            Accepted for interface compatibility; transfer occurs later.
+        **kwargs : Any
+            Ignored compatibility options.
+
+        Yields
+        ------
+        torch.Tensor
+            CPU ``float32`` column tensor of node indices.
+
+        Raises
+        ------
+        RuntimeError
+            If the landscape exposes no sequence count or length.
+        """
         if hasattr(landscape, "sequences"):
             num_items = len(landscape.sequences)
         else:
@@ -473,6 +990,21 @@ class NodeIndexInputAdapter(LandscapeInputAdapter):
     def to_model_inputs(
         self, batch: Any, *, device: Optional[torch.device] = None
     ) -> Any:
+        """Extract a node-index tensor and optionally move it to a device.
+
+        Parameters
+        ----------
+        batch : Any
+            Tensor or single-item DataLoader batch.
+        device : torch.device or None, optional
+            Target device.
+
+        Returns
+        -------
+        Any
+            Device-mapped tensor, or the original value when it is not a
+            tensor.
+        """
         tensor = batch[0] if isinstance(batch, (tuple, list)) else batch
         if device is not None and torch.is_tensor(tensor):
             return tensor.to(device)
@@ -486,6 +1018,27 @@ _INPUT_ADAPTERS: dict[str, InputAdapterFactory] = {}
 def register_input_adapter(
     name: str, factory: InputAdapterFactory, *, overwrite: bool = False
 ) -> None:
+    """Register a landscape input-adapter factory by name.
+
+    Parameters
+    ----------
+    name : str
+        Registry key.
+    factory : callable
+        Factory accepting adapter-specific keyword arguments.
+    overwrite : bool, default=False
+        Replace an existing registration.
+
+    Returns
+    -------
+    None
+        The process-local registry is mutated.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is registered and ``overwrite`` is false.
+    """
     if name in _INPUT_ADAPTERS and not overwrite:
         raise ValueError(f"Input adapter '{name}' is already registered.")
     _INPUT_ADAPTERS[name] = factory
@@ -494,6 +1047,25 @@ def register_input_adapter(
 def resolve_input_adapter(
     adapter: LandscapeInputAdapter | str | None, **kwargs: Any
 ) -> LandscapeInputAdapter:
+    """Resolve an input-adapter instance or registered name.
+
+    Parameters
+    ----------
+    adapter : LandscapeInputAdapter, str, or None
+        Existing adapter, registered name, or ``None`` for ``embedding``.
+    **kwargs : Any
+        Keyword arguments passed to the registered factory.
+
+    Returns
+    -------
+    LandscapeInputAdapter
+        Existing or newly constructed adapter.
+
+    Raises
+    ------
+    ValueError
+        If a requested registry name is unknown.
+    """
     if isinstance(adapter, LandscapeInputAdapter):
         return adapter
     name = adapter or "embedding"
@@ -509,6 +1081,14 @@ register_input_adapter("node_index", NodeIndexInputAdapter, overwrite=True)
 
 
 class LandscapeOutputAdapter(ABC):
+    """Define conversion from named tensors to a Landscapy fitness layer.
+
+    Attributes
+    ----------
+    layer_kind : str
+        Logical output kind served by the adapter.
+    """
+
     layer_kind: str
 
     @abstractmethod
@@ -519,10 +1099,44 @@ class LandscapeOutputAdapter(ABC):
         metadata: Mapping[str, Any],
         layer_name: str,
     ) -> Any:
+        """Construct a fitness layer from model outputs.
+
+        Parameters
+        ----------
+        outputs : mapping of str to torch.Tensor
+            Named prediction tensors.
+        categories : sequence of str or None
+            Optional categorical label order.
+        metadata : mapping of str to Any
+            Prediction provenance attached to the new layer.
+        layer_name : str
+            Requested output layer name.
+
+        Returns
+        -------
+        Any
+            Landscapy fitness layer or compatible custom output.
+        """
         ...
 
 
 class FunctionOutputAdapter(LandscapeOutputAdapter):
+    """Wrap a function as a landscape output adapter.
+
+    Parameters
+    ----------
+    layer_kind : str
+        Logical registry key assigned to the wrapper.
+    func : callable
+        Function accepting ``outputs``, ``categories``, ``metadata``, and
+        ``layer_name`` in that order.
+
+    Attributes
+    ----------
+    layer_kind : str
+        Logical output kind.
+    """
+
     def __init__(self, layer_kind: str, func: Callable[..., Any]) -> None:
         self.layer_kind = layer_kind
         self._func = func
@@ -534,10 +1148,36 @@ class FunctionOutputAdapter(LandscapeOutputAdapter):
         metadata: Mapping[str, Any],
         layer_name: str,
     ) -> Any:
+        """Delegate fitness-layer construction to the wrapped function.
+
+        Parameters
+        ----------
+        outputs : mapping of str to torch.Tensor
+            Named prediction tensors.
+        categories : sequence of str or None
+            Optional category order.
+        metadata : mapping of str to Any
+            Prediction provenance.
+        layer_name : str
+            Requested output layer name.
+
+        Returns
+        -------
+        Any
+            Value returned by the wrapped function.
+        """
         return self._func(outputs, categories, metadata, layer_name)
 
 
 class ProbCategoricalOutputAdapter(LandscapeOutputAdapter):
+    """Build probabilistic categorical Landscapy fitness layers.
+
+    Attributes
+    ----------
+    layer_kind : str
+        Registry key ``"prob_categorical"``.
+    """
+
     layer_kind = "prob_categorical"
 
     def to_layer(
@@ -547,6 +1187,39 @@ class ProbCategoricalOutputAdapter(LandscapeOutputAdapter):
         metadata: Mapping[str, Any],
         layer_name: str,
     ) -> Any:
+        """Convert class probabilities and variance to a fitness layer.
+
+        Parameters
+        ----------
+        outputs : mapping of str to torch.Tensor
+            Required ``mean`` probability tensor with shape
+            ``(n_sequences, n_categories)`` and optional same-shaped ``var``.
+            Tensors may require gradients and reside on any PyTorch device.
+        categories : sequence of str or None
+            Ordered category names. Defaults to ``class_0``, ``class_1``, and
+            so on.
+        metadata : mapping of str to Any
+            Prediction provenance. Variance is added as a NumPy array when
+            supplied.
+        layer_name : str
+            Name for the created fitness layer.
+
+        Returns
+        -------
+        ProbabilisticCategoricalFitness
+            Layer containing detached CPU NumPy probabilities with the input
+            tensor's dtype and shape.
+
+        Raises
+        ------
+        ImportError
+            If Landscapy is unavailable.
+        TypeError
+            If ``mean`` or ``var`` is not a tensor.
+        ValueError
+            If ``mean`` is absent or not two-dimensional, variance shape is
+            incompatible, or category count differs from the output width.
+        """
         if ProbabilisticCategoricalFitness is None:
             raise ImportError(
                 "Probabilistic fitness output requires landscapy to be installed."
@@ -598,6 +1271,14 @@ class ProbCategoricalOutputAdapter(LandscapeOutputAdapter):
 
 
 class NumericOutputAdapter(LandscapeOutputAdapter):
+    """Build numeric Landscapy fitness layers from tensor predictions.
+
+    Attributes
+    ----------
+    layer_kind : str
+        Registry key ``"numeric"``.
+    """
+
     layer_kind = "numeric"
 
     def to_layer(
@@ -607,6 +1288,37 @@ class NumericOutputAdapter(LandscapeOutputAdapter):
         metadata: Mapping[str, Any],
         layer_name: str,
     ) -> Any:
+        """Convert numeric predictions to a detached CPU fitness layer.
+
+        Parameters
+        ----------
+        outputs : mapping of str to torch.Tensor
+            ``output`` tensor or a mapping containing exactly one tensor.
+            Scalars, vectors, and matrices are accepted; scalars and vectors
+            become two-dimensional column tensors.
+        categories : sequence of str or None
+            Ignored; accepted for the common output-adapter interface.
+        metadata : mapping of str to Any
+            Prediction provenance copied onto the layer.
+        layer_name : str
+            Name for the created fitness layer.
+
+        Returns
+        -------
+        NumericFitness
+            Numeric layer backed by a detached CPU tensor or values list,
+            depending on the installed Landscapy API.
+
+        Raises
+        ------
+        ImportError
+            If Landscapy is unavailable.
+        TypeError
+            If the selected output is not a tensor.
+        ValueError
+            If no output is available or the tensor has more than two
+            dimensions.
+        """
         if NumericFitness is None:
             raise ImportError(
                 "Numeric fitness output requires landscapy to be installed."
@@ -653,6 +1365,29 @@ def register_output_adapter(
     *,
     overwrite: bool = False,
 ) -> None:
+    """Register an output-adapter instance or class by layer kind.
+
+    Parameters
+    ----------
+    kind : str
+        Logical output-layer key.
+    adapter : LandscapeOutputAdapter or type of LandscapeOutputAdapter
+        Reusable instance or zero-argument adapter class.
+    overwrite : bool, default=False
+        Replace an existing registration.
+
+    Returns
+    -------
+    None
+        The process-local registry is mutated.
+
+    Raises
+    ------
+    TypeError
+        If ``adapter`` is neither an adapter instance nor subclass.
+    ValueError
+        If ``kind`` is registered and ``overwrite`` is false.
+    """
     if kind in _OUTPUT_ADAPTERS and not overwrite:
         raise ValueError(f"Output adapter for layer kind {kind!r} already exists.")
     if isinstance(adapter, LandscapeOutputAdapter):
@@ -667,11 +1402,49 @@ def register_output_adapter(
 def register_layer_adapter(
     kind: str, adapter: Callable[..., Any], *, overwrite: bool = False
 ) -> None:
+    """Register a function-style output adapter.
+
+    Parameters
+    ----------
+    kind : str
+        Logical output-layer key.
+    adapter : callable
+        Function accepting outputs, categories, metadata, and layer name.
+    overwrite : bool, default=False
+        Replace an existing registration.
+
+    Returns
+    -------
+    None
+        The function is wrapped and registered process-locally.
+
+    Raises
+    ------
+    ValueError
+        If ``kind`` is registered and ``overwrite`` is false.
+    """
     output_adapter = FunctionOutputAdapter(kind, adapter)
     register_output_adapter(kind, output_adapter, overwrite=overwrite)
 
 
 def resolve_output_adapter(kind: str) -> LandscapeOutputAdapter:
+    """Construct the output adapter registered for a logical layer kind.
+
+    Parameters
+    ----------
+    kind : str
+        Logical output-layer key.
+
+    Returns
+    -------
+    LandscapeOutputAdapter
+        Newly constructed or registered reusable adapter.
+
+    Raises
+    ------
+    ValueError
+        If no adapter is registered for ``kind``.
+    """
     if kind not in _OUTPUT_ADAPTERS:
         raise ValueError(f"No adapter registered for layer kind '{kind}'.")
     return _OUTPUT_ADAPTERS[kind]()
