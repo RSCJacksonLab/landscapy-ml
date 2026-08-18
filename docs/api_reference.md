@@ -20,6 +20,7 @@
 - `TrainingJob`, `create_trainer`
 
 ## Inference
+- `LandscapeInferenceResult`
 - `predict_sequences`
 - `predict_landscape_records`
 - `infer_fitness_layer_from_landscape`

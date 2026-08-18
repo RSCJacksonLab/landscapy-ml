@@ -191,6 +191,10 @@ def attach_graph_attention_predictions(
 ) -> Any:
     """
     Run graph-model inference on a landscape and attach the predicted numeric layer.
+
+    Returns the prediction layer when it is unattached or attached in place. With
+    ``attach=True, inplace=False``, returns a ``LandscapeInferenceResult`` containing
+    an independent landscape copy and its attached layer.
     """
 
     return infer_fitness_layer_from_landscape(

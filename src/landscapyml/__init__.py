@@ -24,6 +24,7 @@ from .core.data import (
     make_preferred_input_getter,
 )
 from .core.inference import (
+    LandscapeInferenceResult,
     infer_fitness_layer_from_landscape,
     predict_landscape_records,
     predict_sequences,
@@ -54,6 +55,7 @@ __all__ = [
     "LandscapeGraphDataset",
     "LandscapeGraphRegressionDataModule",
     "LandscapeInputAdapter",
+    "LandscapeInferenceResult",
     "LandscapeOutputAdapter",
     "LandscapeRegressionConfig",
     "ModelAdapter",

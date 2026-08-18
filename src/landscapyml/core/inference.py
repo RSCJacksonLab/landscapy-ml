@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
 
 import torch
@@ -24,6 +26,22 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     FitnessLandscape = Any  # type: ignore
     BaseFitnessLayer = Any  # type: ignore
+
+
+@dataclass(frozen=True)
+class LandscapeInferenceResult:
+    """Hold a copied landscape and the prediction layer attached to it.
+
+    Attributes
+    ----------
+    landscape : FitnessLandscape
+        Independent landscape copy containing ``layer``.
+    layer : BaseFitnessLayer
+        Prediction layer attached to ``landscape``.
+    """
+
+    landscape: FitnessLandscape
+    layer: BaseFitnessLayer
 
 
 def _validated_uncertainty_outputs(
@@ -189,7 +207,7 @@ def infer_fitness_layer_from_landscape(
     categories: Optional[Sequence[str]] = None,
     input_adapter: LandscapeInputAdapter | str | None = None,
     input_adapter_kwargs: Optional[Mapping[str, Any]] = None,
-) -> BaseFitnessLayer:
+) -> BaseFitnessLayer | LandscapeInferenceResult:
     """
     Run inference on a ``FitnessLandscape`` and construct a predicted fitness layer.
 
@@ -208,7 +226,9 @@ def infer_fitness_layer_from_landscape(
     attach : bool, default=True
         Whether to attach the resulting layer to the landscape.
     inplace : bool, default=True
-        If ``attach`` is true, whether to attach in-place or on a copy.
+        If ``attach`` is true, attach to the supplied landscape when true or an
+        independent copy when false. This option has no effect when ``attach``
+        is false.
     layer_name : str, default="predicted_fitness"
         Name assigned to the created layer.
     categories : Sequence[str], optional
@@ -220,9 +240,10 @@ def infer_fitness_layer_from_landscape(
 
     Returns
     -------
-    BaseFitnessLayer
-        Fitness layer produced by the registered output adapter for the model's
-        logical ``layer_kind``.
+    BaseFitnessLayer or LandscapeInferenceResult
+        The fitness layer when ``attach`` is false or ``inplace`` is true. For
+        ``attach=True, inplace=False``, return the copied landscape together
+        with its attached layer in a ``LandscapeInferenceResult``.
 
     Raises
     ------
@@ -315,16 +336,15 @@ def infer_fitness_layer_from_landscape(
     layer = layer_adapter.to_layer(outputs, categories, meta, layer_name)
 
     if attach and hasattr(landscape, "attach"):
-        target = landscape if inplace else landscape.copy()
+        target = landscape if inplace else deepcopy(landscape)
         target_layer_name = layer_name
-        if hasattr(landscape, "safe_layer_name"):
-            try:
-                target_layer_name = landscape.safe_layer_name(layer_name)
-            except Exception:
-                target_layer_name = layer_name
+        if hasattr(target, "safe_layer_name"):
+            target_layer_name = target.safe_layer_name(layer_name)
         if hasattr(layer, "name"):
             layer.name = target_layer_name
         target.attach(layer=layer)
+        if not inplace:
+            return LandscapeInferenceResult(landscape=target, layer=layer)
         return layer
 
     return layer

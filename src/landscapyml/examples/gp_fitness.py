@@ -666,6 +666,10 @@ def attach_diffusion_gp_predictions(
 ) -> Any:
     """
     Predict fitness at every landscape node and attach the mean as a numeric layer.
+
+    Returns the prediction layer when it is unattached or attached in place. With
+    ``attach=True, inplace=False``, returns a ``LandscapeInferenceResult`` containing
+    an independent landscape copy and its attached layer.
     """
 
     return infer_fitness_layer_from_landscape(
