@@ -71,3 +71,13 @@ predicted = attach_graph_attention_predictions(
     layer_name="gat_predicted_fitness",
 )
 ```
+
+## Testing
+
+```bash
+python -m pytest
+```
+
+The test command measures branch coverage for the complete `landscapyml`
+package, writes `coverage.xml`, and enforces the initial release baseline of
+75%. New exclusions should not be added in place of testing core behavior.
