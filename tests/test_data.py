@@ -4,6 +4,7 @@ import types
 import pytest
 import torch
 
+import landscapyml.core.data_utils as data_utils
 from landscapyml.core.data import (
     LandscapeDataModule,
     LandscapeDataset,
@@ -119,6 +120,29 @@ def test_embed_sequences_to_records_creates_expected_fields():
     for rec in records:
         assert "fitness_tensors" in rec and "label" in rec["fitness_tensors"]
         assert "embedding" in rec
+
+
+def test_embed_sequences_to_records_validates_lengths_before_embedding(monkeypatch):
+    def fail_if_called(*args, **kwargs):  # noqa: ARG001
+        raise AssertionError("embed_sequences must not be called")
+
+    monkeypatch.setattr(data_utils, "embed_sequences", fail_if_called)
+
+    with pytest.raises(ValueError, match=r"got 2 sequences and 1 labels"):
+        embed_sequences_to_records(["AAA", "BBB"], [0], label_key="label")
+
+
+@pytest.mark.parametrize("label_key", ["", "   ", None, 1])
+def test_embed_sequences_to_records_validates_label_key_before_embedding(
+    monkeypatch, label_key
+):
+    def fail_if_called(*args, **kwargs):  # noqa: ARG001
+        raise AssertionError("embed_sequences must not be called")
+
+    monkeypatch.setattr(data_utils, "embed_sequences", fail_if_called)
+
+    with pytest.raises(ValueError, match="label_key must be a non-empty string"):
+        embed_sequences_to_records(["AAA"], [0], label_key=label_key)
 
 
 def test_landscape_data_specializations_share_core_abstractions():
