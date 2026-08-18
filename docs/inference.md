@@ -26,13 +26,20 @@ Inference helpers live in `landscapyml.core.inference` and operate on trained mo
 - `NodeIndexInputAdapter`: generic core adapter for models that consume landscape node indices as inputs.
 - `LandscapeOutputAdapter`: ABC that converts model outputs into landscape fitness layers.
 - `register_input_adapter(name, factory, overwrite=False)`: Register a landscape input adapter (e.g., graph/structure extractors).
-- `register_model_adapter(model_cls, adapter_factory, overwrite=False)`: Register a model adapter for a specific class. Adapters expose a `layer_kind` and a `predict(inputs)` method.
-- `register_model_layer_mapping(model_cls, layer_kind, overwrite=False)`: Map additional model types to a logical layer kind string (e.g., `prob_categorical`) when the default adapter is sufficient.
+- `register_model_adapter(model_cls, adapter_factory, overwrite=False)`: Register a model adapter for a model class. Adapters expose a `layer_kind` and a `predict(inputs)` method.
+- `register_model_layer_mapping(model_cls, layer_kind, overwrite=False)`: Map a model class and its subclasses to a logical layer kind string (e.g., `prob_categorical`) when the default adapter is sufficient.
 - `register_output_adapter(kind, adapter, overwrite=False)`: Register a landscape output adapter class/instance for a layer kind.
 - `register_layer_adapter(kind, adapter, overwrite=False)`: Convenience wrapper for function-style output adapters.
 
 Model-specific bridges should live at the package edge rather than in the
 shared core.
+
+Both model adapter factories and model-to-layer mappings are resolved using
+Python's method resolution order (MRO). An exact-class registration therefore
+wins over a base-class registration; with multiple inheritance, the first
+registered class in the model's MRO wins. A registered adapter factory takes
+priority over a model-to-layer mapping because it defines the complete
+inference interface.
 
 For graph-native models, `landscapyml.examples.gat_fitness` reuses the core
 `GraphTensorInputAdapter` and also exposes a backwards-compatible

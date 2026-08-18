@@ -130,7 +130,12 @@ def resolve_model_adapter(model: Any) -> ModelAdapter:
         factory = _MODEL_ADAPTERS.get(cls)
         if factory is not None:
             return factory(model)
-    layer_kind = getattr(model, "layer_kind", None) or _MODEL_TO_LAYER.get(model_type)
+    layer_kind = getattr(model, "layer_kind", None)
+    if not layer_kind:
+        for cls in model_type.mro():
+            layer_kind = _MODEL_TO_LAYER.get(cls)
+            if layer_kind is not None:
+                break
     if layer_kind is None:
         raise ValueError(
             f"Model type {model_type.__name__} is not supported for inference."

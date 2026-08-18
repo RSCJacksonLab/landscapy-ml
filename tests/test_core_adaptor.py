@@ -87,8 +87,54 @@ def test_resolve_model_adapter_raises_for_unmapped_class():
         def forward(self, x):
             return x
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="UnmappedModel"):
         resolve_model_adapter(UnmappedModel())
+
+
+def test_resolve_model_adapter_inherits_base_layer_mapping():
+    class BaseModel(torch.nn.Module):
+        pass
+
+    class DerivedModel(BaseModel):
+        pass
+
+    register_model_layer_mapping(BaseModel, "base_kind", overwrite=True)
+
+    assert resolve_model_adapter(BaseModel()).layer_kind == "base_kind"
+    assert resolve_model_adapter(DerivedModel()).layer_kind == "base_kind"
+
+
+def test_resolve_model_adapter_prefers_subclass_layer_mapping():
+    class BaseModel(torch.nn.Module):
+        pass
+
+    class DerivedModel(BaseModel):
+        pass
+
+    register_model_layer_mapping(BaseModel, "base_kind", overwrite=True)
+    register_model_layer_mapping(DerivedModel, "derived_kind", overwrite=True)
+
+    assert resolve_model_adapter(DerivedModel()).layer_kind == "derived_kind"
+
+
+def test_resolve_model_adapter_uses_python_mro_for_multiple_inheritance():
+    class LeftModel(torch.nn.Module):
+        pass
+
+    class RightModel(torch.nn.Module):
+        pass
+
+    class LeftFirstModel(LeftModel, RightModel):
+        pass
+
+    class RightFirstModel(RightModel, LeftModel):
+        pass
+
+    register_model_layer_mapping(LeftModel, "left_kind", overwrite=True)
+    register_model_layer_mapping(RightModel, "right_kind", overwrite=True)
+
+    assert resolve_model_adapter(LeftFirstModel()).layer_kind == "left_kind"
+    assert resolve_model_adapter(RightFirstModel()).layer_kind == "right_kind"
 
 
 def test_embedding_input_adapter_yields_batches_and_metadata():
