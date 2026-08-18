@@ -171,6 +171,84 @@ def test_generic_datamodule_splits_train_val():
     assert len(train_loader.dataset) + len(val_loader.dataset) == len(records)
 
 
+def _generic_records(count):
+    return [
+        {
+            "sequence_tensor": torch.tensor([float(idx)]),
+            "fitness_tensors": {"label": idx},
+        }
+        for idx in range(count)
+    ]
+
+
+@pytest.mark.parametrize("val_split", [-0.1, 1.0, 1.1, float("inf"), float("nan")])
+def test_generic_datamodule_rejects_out_of_range_validation_splits(val_split):
+    with pytest.raises(
+        ValueError,
+        match=r"val_split must satisfy 0 <= val_split < 1.*2 training records",
+    ):
+        LandscapeDataModule(train_data=_generic_records(2), val_split=val_split)
+
+
+def test_generic_datamodule_allows_zero_split_for_one_record():
+    dm = LandscapeDataModule(train_data=_generic_records(1), val_split=0)
+
+    dm.setup("fit")
+
+    assert len(dm.train_records) == 1
+    assert dm.val_records == []
+
+
+@pytest.mark.parametrize(
+    ("record_count", "val_split"),
+    [(1, 0.01), (2, 0.75), (2, 0.999999)],
+)
+def test_generic_datamodule_rejects_splits_that_empty_training(
+    record_count, val_split
+):
+    with pytest.raises(
+        ValueError,
+        match=rf"val_split={val_split} leaves no training records from {record_count}",
+    ):
+        LandscapeDataModule(
+            train_data=_generic_records(record_count),
+            val_split=val_split,
+        )
+
+
+def test_generic_datamodule_two_records_can_split_one_each():
+    dm = LandscapeDataModule(
+        train_data=_generic_records(2),
+        val_split=0.5,
+        val_seed=3,
+    )
+
+    dm.setup("fit")
+
+    assert len(dm.train_records) == 1
+    assert len(dm.val_records) == 1
+
+
+def test_generic_datamodule_repeated_setup_is_idempotent():
+    dm = LandscapeDataModule(
+        train_data=_generic_records(5),
+        val_split=0.4,
+        val_seed=7,
+    )
+    dm.setup("fit")
+    first_train = [record["fitness_tensors"]["label"] for record in dm.train_records]
+    first_val = [record["fitness_tensors"]["label"] for record in dm.val_records]
+
+    dm.setup("fit")
+
+    assert [
+        record["fitness_tensors"]["label"] for record in dm.train_records
+    ] == first_train
+    assert [
+        record["fitness_tensors"]["label"] for record in dm.val_records
+    ] == first_val
+
+
 def test_graph_regression_falls_back_for_variable_length_sequences():
     import networkx as nx
     import numpy as np

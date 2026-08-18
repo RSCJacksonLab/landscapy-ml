@@ -14,6 +14,12 @@ dictionaries with:
 `LandscapeDataset` and `LandscapeDataModule` are the generic dataset and
 Lightning data module wrappers for those records.
 
+`LandscapeDataModule(val_split=...)` accepts fractions from zero (inclusive)
+to one (exclusive). A positive fraction must leave at least one training and
+one validation record; infeasible fractions are rejected during initialization
+before the record lists are split. Repeated `setup("fit")` calls reuse the same
+partition.
+
 ## Graph Regression
 `LandscapeGraphRegressionDataModule.from_landscape(...)` converts a numeric
 fitness layer into node-level regression targets on a single landscape graph.
