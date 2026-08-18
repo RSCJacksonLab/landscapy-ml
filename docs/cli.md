@@ -29,3 +29,9 @@ configured train or test label after trimming whitespace and normalizing case.
 Blank or unknown labels are rejected with their CSV row numbers; validation
 markers take precedence. Result JSON records train, validation, test, and total
 assigned row counts.
+
+The legacy `train-landscape` workflow delegates CSV construction to Landscapy
+with a Hamming graph. It preserves disconnected components and does not replace
+the requested topology with a k-nearest-neighbor graph. Inputs that cannot form
+a Hamming graph, including unaligned variable-length sequences, fail with the
+Landscapy construction error.

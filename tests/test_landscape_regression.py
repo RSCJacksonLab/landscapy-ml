@@ -347,16 +347,20 @@ def test_run_csv_dispatches_registered_runner_and_writes_json(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    from fitness_landscape.core import landscape as landscape_module
+
     path = _write_csv(
         tmp_path / "input.csv",
         "sequence,target,set\nAAA,1,train\nAAC,2,test\n",
     )
     layer = SimpleNamespace(to_scalar=lambda: np.array([1.0, 2.0]))
-    landscape = SimpleNamespace(fitness_layers={"target": layer})
+    landscape = SimpleNamespace(
+        fitness_layers={"target": layer}, graph=nx.path_graph(2)
+    )
     monkeypatch.setattr(
-        regression,
-        "_build_connected_landscape",
-        lambda *args, **kwargs: (landscape, {"used": "hamming"}),
+        landscape_module,
+        "read_csv_landscape",
+        lambda *args, **kwargs: landscape,
     )
 
     def runner(context):
@@ -373,106 +377,47 @@ def test_run_csv_dispatches_registered_runner_and_writes_json(
     assert json.loads(output.read_text(encoding="utf-8"))["values"] == [1, 2]
 
 
-def test_graph_strategy_provenance_for_connected_and_disconnected_inputs(
+def test_run_csv_preserves_disconnected_hamming_topology(
     tmp_path: Path,
 ) -> None:
-    connected = _write_csv(
-        tmp_path / "connected.csv",
-        "sequence,target\nAAA,0\nAAC,1\n",
-    )
-    disconnected = _write_csv(
+    path = _write_csv(
         tmp_path / "disconnected.csv",
-        "sequence,target\nAAA,0\nCCC,1\n",
+        "sequence,target,set\nAAA,0,train\nCCC,1,test\n",
     )
+    observed = {}
 
-    _, hamming_info = regression._build_connected_landscape(
-        connected,
-        sequence_column="sequence",
-        target_column="target",
-        moltype=None,
-    )
-    _, knn_info = regression._build_connected_landscape(
-        disconnected,
-        sequence_column="sequence",
-        target_column="target",
-        moltype=None,
-    )
+    def runner(context):
+        observed["graph"] = context.landscape.graph.copy()
+        observed["graph_info"] = context.graph_info
+        return {"status": "ok"}
 
-    assert hamming_info["used"] == "hamming"
-    assert hamming_info["hamming"]["component_count"] == 1
-    assert knn_info["used"] == "knn"
-    assert knn_info["hamming"]["component_count"] == 2
-    assert knn_info["knn"]["component_count"] == 1
+    regression.register_landscape_regression_runner("unit", runner, overwrite=True)
+    config = regression.LandscapeRegressionConfig(model_key="unit", csv_paths=[path])
+
+    regression.run_landscape_regression_csv(config, path)
+
+    assert observed["graph"].number_of_edges() == 0
+    assert observed["graph_info"]["used"] == "hamming"
+    assert observed["graph_info"]["hamming"]["component_count"] == 2
+    assert observed["graph_info"]["parameters"]["graph"] == "hamming"
+    assert observed["graph_info"]["parameters"]["alphabet"] == "PROT_20"
+    assert "knn" not in observed["graph_info"]
 
 
-def test_variable_length_composition_helper_and_provenance_branch(
-    monkeypatch: pytest.MonkeyPatch,
+def test_run_csv_rejects_variable_length_hamming_input(
     tmp_path: Path,
 ) -> None:
-    from fitness_landscape._const import PROT_20
-    from fitness_landscape.core import landscape as landscape_module
-
     path = _write_csv(
         tmp_path / "variable.csv",
         "sequence,target\nAAA,0\nAAAA,1\n",
     )
-    fallback_landscape, k = regression._build_composition_knn_landscape_from_csv(
-        path,
-        sequence_column="sequence",
-        target_column="target",
-        moltype=None,
-        alphabet=PROT_20,
-    )
-    monkeypatch.setattr(
-        landscape_module,
-        "read_csv_landscape",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            ValueError("sequences must all have the same length")
-        ),
-    )
-    monkeypatch.setattr(
-        regression,
-        "_build_composition_knn_landscape_from_csv",
-        lambda *args, **kwargs: (fallback_landscape, k),
-    )
+    config = regression.LandscapeRegressionConfig(model_key="unit", csv_paths=[path])
 
-    landscape, info = regression._build_connected_landscape(
-        path,
-        sequence_column="sequence",
-        target_column="target",
-        moltype=None,
-    )
-
-    assert landscape is fallback_landscape
-    assert info["used"] == "composition_knn"
-    assert info["composition_knn"]["component_count"] == 1
+    with pytest.raises(ValueError, match="uniform aligned length"):
+        regression.run_landscape_regression_csv(config, path)
 
 
-@pytest.mark.parametrize("missing_column", ["sequence", "target"])
-def test_composition_helper_validates_columns(
-    tmp_path: Path,
-    missing_column: str,
-) -> None:
-    from fitness_landscape._const import PROT_20
-
-    columns = [column for column in ("sequence", "target") if column != missing_column]
-    path = _write_csv(tmp_path / "missing.csv", f"{columns[0]}\nAAA\n")
-
-    with pytest.raises(ValueError, match=f"missing {missing_column} column"):
-        regression._build_composition_knn_landscape_from_csv(
-            path,
-            sequence_column="sequence",
-            target_column="target",
-            moltype=None,
-            alphabet=PROT_20,
-        )
-
-
-def test_composition_graph_and_component_summary_edge_cases() -> None:
-    graph = regression._composition_knn_graph(["AAA"], k=10, alphabet=list("AC"))
-    assert graph.number_of_nodes() == 1
-    assert graph.number_of_edges() == 0
-
+def test_component_summary_truncates_disconnected_components() -> None:
     directed = nx.DiGraph()
     directed.add_nodes_from(range(25))
     summary = regression._component_summary(directed)

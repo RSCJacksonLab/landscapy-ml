@@ -6,7 +6,6 @@ import csv
 import gzip
 import importlib
 import json
-import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -15,7 +14,6 @@ import networkx as nx
 import numpy as np
 from scipy.stats import pearsonr, spearmanr
 
-from .core.data_utils import sequence_composition_features
 from .core.inference import infer_fitness_layer_from_landscape
 from .core.model_registry import _MODEL_REGISTRY
 from .core.trainer import TrainingJob
@@ -128,9 +126,8 @@ class LandscapeRegressionConfig:
 
     Notes
     -----
-    Graph selection performed by this legacy example runner is recorded in
-    each result. It is a modeling choice and should not be interpreted as
-    biological validation of the selected representation.
+    This legacy example runner requests Landscapy's Hamming graph without
+    substituting another topology. Graph construction errors are propagated.
     """
 
     model_key: str
@@ -362,30 +359,49 @@ def run_landscape_regression_csv(
     ImportError
         If required Landscapy, model, or optional runner dependencies are
         unavailable.
-    RuntimeError
-        If the selected fallback graph is disconnected.
     ValueError
         If CSV schema, graph construction, splits, or model selection is
         invalid.
 
     Notes
     -----
-    The legacy helper requests a Hamming graph and may substitute a k-nearest
-    neighbor graph to force connectivity. The result's ``graph`` field records
-    the representation actually used; callers must treat that substitution as
-    a scientific modeling choice.
+    The runner requests a Hamming graph from Landscapy and preserves the
+    resulting topology, including disconnected components. It does not select
+    a fallback graph.
     """
     output_path = output_path or _output_path_for_csv(
         csv_path,
         config.model_key,
         config.output_suffix,
     )
-    landscape, graph_info = _build_connected_landscape(
+    from fitness_landscape._const import PROT_20
+    from fitness_landscape.core.landscape import read_csv_landscape
+
+    landscape = read_csv_landscape(
         csv_path,
-        sequence_column=config.sequence_column,
-        target_column=config.target_column,
+        sequence_col=config.sequence_column,
+        alphabet=PROT_20,
         moltype=config.moltype,
+        graph="hamming",
+        numeric_layers=[config.target_column],
+        embedding_domain="ohe",
+        attach_embeddings=False,
     )
+    graph_info = {
+        "constructor": "fitness_landscape.core.landscape.read_csv_landscape",
+        "parameters": {
+            "graph": "hamming",
+            "sequence_col": config.sequence_column,
+            "alphabet": "PROT_20",
+            "numeric_layers": [config.target_column],
+            "embedding_domain": "ohe",
+            "attach_embeddings": False,
+            "moltype": config.moltype,
+        },
+        "requested": "hamming",
+        "used": "hamming",
+        "hamming": _component_summary(landscape.graph),
+    }
     splits = _read_split_indices(
         csv_path,
         split_column=config.split_column,
@@ -482,168 +498,6 @@ def _read_split_indices(
 
 def _parse_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
-
-
-def _build_connected_landscape(
-    path: Path,
-    *,
-    sequence_column: str,
-    target_column: str,
-    moltype: str | None,
-) -> tuple[Any, dict[str, Any]]:
-    from fitness_landscape._const import PROT_20
-    from fitness_landscape.core.landscape import FitnessLandscape, read_csv_landscape
-
-    try:
-        landscape = read_csv_landscape(
-            path,
-            sequence_col=sequence_column,
-            alphabet=PROT_20,
-            moltype=moltype,
-            graph="hamming",
-            numeric_layers=[target_column],
-            embedding_domain="ohe",
-            attach_embeddings=False,
-        )
-    except ValueError as exc:
-        if "must all have the same length" not in str(exc):
-            raise
-        landscape, k = _build_composition_knn_landscape_from_csv(
-            path,
-            sequence_column=sequence_column,
-            target_column=target_column,
-            moltype=moltype,
-            alphabet=PROT_20,
-        )
-        summary = _component_summary(landscape.graph)
-        graph_info = {
-            "requested": "hamming",
-            "used": "composition_knn",
-            "hamming_error": str(exc),
-            "composition_knn_k": k,
-            "composition_knn": summary,
-        }
-        if summary["component_count"] != 1:
-            raise RuntimeError(
-                "Composition KNN fallback did not produce a single connected "
-                f"component for {path} with k={k}."
-            ) from exc
-        return landscape, graph_info
-
-    hamming_summary = _component_summary(landscape.graph)
-    graph_info: dict[str, Any] = {
-        "requested": "hamming",
-        "used": "hamming",
-        "hamming": hamming_summary,
-    }
-    if hamming_summary["component_count"] == 1:
-        return landscape, graph_info
-
-    k = max(1, int(math.sqrt(len(landscape.sequences))))
-    knn_landscape = FitnessLandscape.build(
-        sequences=landscape.sequences,
-        graph="knn",
-        fitness_layers=landscape.fitness_layers,
-        embedding_domain="ohe",
-        attach_embeddings=False,
-        k=k,
-    )
-    knn_summary = _component_summary(knn_landscape.graph)
-    graph_info.update(
-        {
-            "used": "knn",
-            "knn_k": k,
-            "knn": knn_summary,
-        }
-    )
-    if knn_summary["component_count"] != 1:
-        raise RuntimeError(
-            "KNN fallback did not produce a single connected component "
-            f"for {path} with k={k}."
-        )
-    return knn_landscape, graph_info
-
-
-def _build_composition_knn_landscape_from_csv(
-    path: Path,
-    *,
-    sequence_column: str,
-    target_column: str,
-    moltype: str | None,
-    alphabet: Sequence[Any],
-) -> tuple[Any, int]:
-    import pandas as pd
-    from fitness_landscape.core.fitness import NumericFitness
-    from fitness_landscape.core.landscape import FitnessLandscape
-    from fitness_landscape.core.sequence import make_sequence
-
-    df = pd.read_csv(path)
-    if sequence_column not in df.columns:
-        raise ValueError(f"CSV is missing sequence column {sequence_column!r}.")
-    if target_column not in df.columns:
-        raise ValueError(f"CSV is missing target column {target_column!r}.")
-
-    sequences = [
-        make_sequence(value, alphabet=alphabet, moltype=moltype)
-        for value in df[sequence_column].tolist()
-    ]
-    layer = NumericFitness.from_scalars(
-        target_column,
-        df[target_column].to_numpy(dtype=float),
-    )
-    n = len(sequences)
-    k = max(1, int(math.sqrt(n)))
-    graph = _composition_knn_graph(sequences, k=k, alphabet=alphabet)
-    summary = _component_summary(graph)
-    while summary["component_count"] != 1 and k < max(1, n - 1):
-        k = min(n - 1, max(k + 1, k * 2))
-        graph = _composition_knn_graph(sequences, k=k, alphabet=alphabet)
-        summary = _component_summary(graph)
-
-    return (
-        FitnessLandscape.build(
-            sequences=sequences,
-            graph=graph,
-            fitness_layers={target_column: layer},
-            embedding_domain="ohe",
-            attach_embeddings=False,
-        ),
-        k,
-    )
-
-
-def _composition_knn_graph(
-    sequences: Sequence[Any],
-    *,
-    k: int,
-    alphabet: Sequence[Any],
-) -> nx.Graph:
-    from scipy.spatial import cKDTree
-
-    n = len(sequences)
-    graph = nx.Graph()
-    for idx, sequence in enumerate(sequences):
-        graph.add_node(idx, sequence=sequence)
-    if n <= 1:
-        return graph
-
-    k = min(max(1, int(k)), n - 1)
-    features = sequence_composition_features(sequences, alphabet=alphabet)
-    tree = cKDTree(features)
-    distances, indices = tree.query(features, k=k + 1)
-    distances = np.asarray(distances)
-    indices = np.asarray(indices)
-    if indices.ndim == 1:
-        indices = indices[:, None]
-        distances = distances[:, None]
-
-    for src in range(n):
-        for distance, dst in zip(distances[src], indices[src]):
-            dst = int(dst)
-            if dst == src:
-                continue
-            graph.add_edge(src, dst, distance=float(distance))
-    return graph
 
 
 def _component_summary(graph: nx.Graph) -> dict[str, Any]:
