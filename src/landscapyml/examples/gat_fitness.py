@@ -1,3 +1,5 @@
+"""Graph-attention regression example for Landscapy fitness landscapes."""
+
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -26,8 +28,44 @@ def _load_gat_conv():
 
 
 class GraphAttentionFitnessRegressor(pl.LightningModule):
-    """
-    Example graph attention regressor for semi-supervised node fitness prediction.
+    """Regress node fitness with graph attention convolutions.
+
+    Parameters
+    ----------
+    in_channels : int or None, optional
+        Explicit node-feature width. Takes priority over ``num_features``.
+    num_features : int or None, optional
+        Registry-compatible alias for the node-feature width.
+    hidden_channels : int, default=64
+        Hidden channels per attention head.
+    num_layers : int, default=2
+        Number of graph attention layers.
+    heads : int, default=4
+        Attention heads in hidden layers.
+    dropout : float, default=0.1
+        Attention and hidden-activation dropout probability.
+    learning_rate : float, default=1e-3
+        Adam learning rate.
+    weight_decay : float, default=0.0
+        Adam weight decay.
+
+    Attributes
+    ----------
+    convs : torch.nn.ModuleList
+        Ordered graph attention layers.
+    feature_normalization_mean : torch.Tensor
+        Optional per-feature mean loaded from the first input graph.
+    feature_normalization_scale : torch.Tensor
+        Optional positive per-feature scale loaded from the first input graph.
+    layer_kind : str
+        Output-adapter key ``"numeric"``.
+
+    Raises
+    ------
+    ImportError
+        If PyTorch Geometric is unavailable.
+    ValueError
+        If dimensions, layer count, or attention-head count are invalid.
     """
 
     layer_kind = "numeric"
@@ -119,6 +157,26 @@ class GraphAttentionFitnessRegressor(pl.LightningModule):
         return (x - mean) / scale
 
     def forward(self, graph: Any) -> torch.Tensor:
+        """Predict one scalar for every graph node.
+
+        Parameters
+        ----------
+        graph : Any
+            PyTorch Geometric-style graph with floating ``x`` of shape
+            ``(n_nodes, n_features)`` and integer ``edge_index`` of shape
+            ``(2, n_edges)`` on the model device.
+
+        Returns
+        -------
+        torch.Tensor
+            Node predictions with shape ``(n_nodes,)`` on the input device.
+
+        Raises
+        ------
+        ValueError
+            If stored feature-normalization statistics are invalid or
+            incompatible with graph feature width.
+        """
         x = self._normalize_features(graph)
         edge_index = graph.edge_index
         for conv in self.convs[:-1]:
@@ -129,6 +187,18 @@ class GraphAttentionFitnessRegressor(pl.LightningModule):
         return x.view(-1)
 
     def predict(self, graph: Any) -> torch.Tensor:
+        """Predict node fitness through :meth:`forward`.
+
+        Parameters
+        ----------
+        graph : Any
+            PyTorch Geometric-style graph on the model device.
+
+        Returns
+        -------
+        torch.Tensor
+            Node predictions with shape ``(n_nodes,)``.
+        """
         return self(graph)
 
     def _step(self, graph: Any, mask_name: str, stage: str) -> Optional[torch.Tensor]:
@@ -155,6 +225,25 @@ class GraphAttentionFitnessRegressor(pl.LightningModule):
         return loss
 
     def training_step(self, graph: Any, batch_idx: int) -> torch.Tensor:
+        """Compute and log masked training loss.
+
+        Parameters
+        ----------
+        graph : Any
+            Full graph carrying ``y`` and ``train_mask`` tensors.
+        batch_idx : int
+            Lightning batch index; unused for the single-graph dataset.
+
+        Returns
+        -------
+        torch.Tensor
+            Scalar mean-squared error on finite training targets.
+
+        Raises
+        ------
+        RuntimeError
+            If no finite supervised training node exists.
+        """
         loss = self._step(graph, "train_mask", "train")
         if loss is None:
             raise RuntimeError(
@@ -163,18 +252,54 @@ class GraphAttentionFitnessRegressor(pl.LightningModule):
         return loss
 
     def validation_step(self, graph: Any, batch_idx: int) -> Optional[torch.Tensor]:
+        """Compute and log masked validation loss.
+
+        Parameters
+        ----------
+        graph : Any
+            Full graph carrying ``y`` and optional ``val_mask`` tensors.
+        batch_idx : int
+            Lightning batch index; unused for the single-graph dataset.
+
+        Returns
+        -------
+        torch.Tensor or None
+            Scalar mean-squared error, or ``None`` when no finite validation
+            node is selected.
+        """
         return self._step(graph, "val_mask", "val")
 
     def test_step(self, graph: Any, batch_idx: int) -> Optional[torch.Tensor]:
+        """Compute and log masked test loss.
+
+        Parameters
+        ----------
+        graph : Any
+            Full graph carrying ``y`` and optional ``test_mask`` tensors.
+        batch_idx : int
+            Lightning batch index; unused for the single-graph dataset.
+
+        Returns
+        -------
+        torch.Tensor or None
+            Scalar mean-squared error, or ``None`` when no finite test node is
+            selected.
+        """
         return self._step(graph, "test_mask", "test")
 
     def configure_optimizers(self):
+        """Construct the Adam optimizer from saved hyperparameters.
+
+        Returns
+        -------
+        torch.optim.Adam
+            Optimizer over all trainable model parameters.
+        """
         return torch.optim.Adam(
             self.parameters(),
             lr=self.hparams.learning_rate,
             weight_decay=self.hparams.weight_decay,
         )
-
 
 def attach_graph_attention_predictions(
     landscape: Any,
@@ -185,14 +310,38 @@ def attach_graph_attention_predictions(
     attach: bool = True,
     inplace: bool = True,
 ) -> Any:
-    """
-    Run graph-model inference on a landscape and attach the predicted numeric layer.
+    """Predict graph-attention fitness for every landscape node.
 
-    Returns the prediction layer when it is unattached or attached in place. With
-    ``attach=True, inplace=False``, returns a ``LandscapeInferenceResult`` containing
-    an independent landscape copy and its attached layer.
-    """
+    Parameters
+    ----------
+    landscape : Any
+        Landscapy fitness landscape providing graph tensor export or a graph
+        and sequences.
+    model : GraphAttentionFitnessRegressor
+        Trained graph attention model.
+    layer_name : str, default="gat_predicted_fitness"
+        Requested numeric prediction-layer name.
+    tokenizer : Any, str, or None, optional
+        Tokenizer forwarded to graph tensor export.
+    attach : bool, default=True
+        Attach the prediction layer to a landscape.
+    inplace : bool, default=True
+        Attach to the supplied landscape when true or an independent copy when
+        false. Ignored when ``attach`` is false.
 
+    Returns
+    -------
+    BaseFitnessLayer or LandscapeInferenceResult
+        Prediction layer when unattached or attached in place. For
+        ``attach=True, inplace=False``, the copied landscape and attached layer.
+
+    Raises
+    ------
+    ImportError
+        If required Landscapy or PyTorch Geometric functionality is missing.
+    ValueError
+        If graph export, model output, or attachment metadata is invalid.
+    """
     return infer_fitness_layer_from_landscape(
         landscape,
         model,

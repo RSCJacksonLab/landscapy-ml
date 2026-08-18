@@ -1,3 +1,5 @@
+"""Diffusion-prior exact Gaussian-process example for Landscapy graphs."""
+
 from __future__ import annotations
 
 import warnings
@@ -70,10 +72,20 @@ def sequence_has_masked_residue(
     *,
     mask_tokens: Sequence[str] = DEFAULT_MASK_TOKENS,
 ) -> bool:
-    """
-    Return ``True`` when a sequence contains any configured masking token.
-    """
+    """Test whether a sequence contains a configured masking token.
 
+    Parameters
+    ----------
+    sequence : Any
+        Landscapy sequence object, string, or array-like token sequence.
+    mask_tokens : sequence of str, default=DEFAULT_MASK_TOKENS
+        Tokens interpreted as masked, ambiguous, or gap residues.
+
+    Returns
+    -------
+    bool
+        ``True`` when at least one flattened token matches exactly.
+    """
     tokens = set(_normalize_mask_tokens(mask_tokens))
     if not tokens:
         return False
@@ -170,6 +182,42 @@ def _compute_diffusion_covariance_matrix(
 
 @dataclass
 class DiffusionGPArtifacts:
+    """Store fixed covariance, node inputs, targets, and fitted prior scale.
+
+    Parameters
+    ----------
+    covariance_matrix : torch.Tensor
+        CPU ``float32`` covariance with shape ``(n_nodes, n_nodes)``.
+    all_inputs : torch.Tensor
+        CPU ``float32`` node-index column with shape ``(n_nodes, 1)``.
+    train_inputs : torch.Tensor
+        Training rows selected from ``all_inputs``.
+    train_targets : torch.Tensor
+        Finite ``float32`` targets aligned with ``train_inputs``.
+    full_targets : torch.Tensor
+        All aligned targets, including non-finite held-out observations.
+    observed_mask : torch.Tensor
+        Boolean mask of finite source targets.
+    predict_mask : torch.Tensor
+        Boolean complement of selected training nodes.
+    fit_indices : torch.Tensor
+        Nodes used to estimate diffusion scale.
+    train_indices : torch.Tensor
+        Nodes used for GP likelihood optimization.
+    t_map : float
+        Maximum-a-posteriori diffusion scale.
+    signal_variance : float
+        Training signal variance used to scale covariance.
+    mask_tokens : tuple of str
+        Tokens excluded from diffusion-scale fitting when requested.
+    normalize_features : bool, default=False
+        Whether scalar node-index inputs are normalized in the model.
+    feature_normalization_mean : float, default=0.0
+        Training-index mean.
+    feature_normalization_scale : float, default=1.0
+        Positive training-index population standard deviation.
+    """
+
     covariance_matrix: torch.Tensor
     all_inputs: torch.Tensor
     train_inputs: torch.Tensor
@@ -189,6 +237,20 @@ class DiffusionGPArtifacts:
 
 @dataclass
 class DiffusionGPFitResult:
+    """Store a fitted diffusion GP and its reproducibility artifacts.
+
+    Parameters
+    ----------
+    model : DiffusionPriorExactGP
+        Fitted exact Gaussian-process model.
+    likelihood : Any
+        Fitted GPyTorch Gaussian likelihood.
+    artifacts : DiffusionGPArtifacts
+        Covariance, split, target, scale, and normalization inputs.
+    losses : list of float
+        Marginal negative log-likelihood after each optimization iteration.
+    """
+
     model: "DiffusionPriorExactGP"
     likelihood: Any
     artifacts: DiffusionGPArtifacts
@@ -215,17 +277,72 @@ def build_diffusion_gp_artifacts_from_landscape(
     normalize_features: bool = False,
     feature_normalization_eps: float = 1e-8,
 ) -> DiffusionGPArtifacts:
-    """
-    Build the fixed diffusion covariance and node-index training inputs for an
-    exact GP over a single landscape graph.
+    """Build fixed diffusion covariance and node-index GP inputs.
 
     ``t_MAP`` is fit on the training, unmasked subgraph when possible, then the
     resulting diffusion scale is reused to construct a covariance over the full
     landscape graph, including held-out and masked sequences. If
     ``train_indices`` is omitted, all finite targets are treated as training
     observations.
-    """
 
+    Parameters
+    ----------
+    landscape : Any
+        Landscapy fitness landscape with a graph, sequences, and fitness layers.
+    target_layer : str
+        Numeric fitness-layer name.
+    aggregate_func : callable or None, default=numpy.mean
+        Replicate aggregation function.
+    train_indices : sequence of int, torch.Tensor, or None, optional
+        Canonical nodes used for GP training. Defaults to all finite targets.
+    mask_tokens : sequence of str, default=DEFAULT_MASK_TOKENS
+        Tokens treated as masked during diffusion-scale estimation.
+    drop_masked_sequences_for_t_map : bool, default=True
+        Exclude masked training sequences from diffusion-scale fitting when at
+        least two unmasked training nodes remain.
+    t_min : float, default=0.01
+        Minimum diffusion scale passed to Landscapy estimation.
+    t_max : float, default=100.0
+        Maximum diffusion scale passed to Landscapy estimation.
+    epsilon : float, default=1e-8
+        Positive numerical adjustment for diffusion estimation and covariance.
+    method : str, default="grid"
+        Landscapy diffusion-scale optimization method.
+    grid_size : int, default=256
+        Candidate count for grid optimization.
+    prior : str, default="log_uniform"
+        Diffusion-scale prior used by Landscapy.
+    bootstrap_samples : int, default=200
+        Bootstrap replicates used by Landscapy estimation.
+    random_state : int or None, optional
+        Random seed for diffusion-scale estimation.
+    min_signal_variance : float, default=1e-6
+        Lower bound for covariance signal variance.
+    normalize_features : bool, default=False
+        Record scalar node-index normalization for the GP model.
+    feature_normalization_eps : float, default=1e-8
+        Minimum population standard deviation before replacement by one.
+
+    Returns
+    -------
+    DiffusionGPArtifacts
+        CPU tensors and scalar settings required to construct and audit the GP.
+
+    Raises
+    ------
+    ImportError
+        If required Landscapy analysis functionality is unavailable.
+    ValueError
+        If the graph, target layer, target alignment, training indices, or
+        eligible diffusion-scale subset is invalid.
+
+    Notes
+    -----
+    Diffusion scale is a graph-dependent scientific prior. The fitted subset,
+    mask policy, graph, scale bounds, prior, and random state should be retained
+    with experimental outputs. Mask filtering falls back to all training nodes
+    with a warning when fewer than two eligible unmasked nodes remain.
+    """
     _require_landscapy_bits()
 
     if getattr(landscape, "graph", None) is None:
@@ -372,8 +489,41 @@ else:  # pragma: no cover - exercised only without gpytorch installed
 
 
 class DiffusionPriorKernel(_KernelBase):
-    """
-    GPyTorch kernel backed by a fixed, precomputed landscape covariance matrix.
+    """Index a fixed, precomputed landscape covariance matrix.
+
+    Parameters
+    ----------
+    covariance_matrix : torch.Tensor
+        Square ``float32`` covariance over all landscape nodes.
+    jitter : float, default=1e-4
+        Diagonal adjustment added when both index vectors are identical.
+    normalize_features : bool, default=False
+        Invert stored scalar normalization before converting inputs to indices.
+    feature_normalization_mean : float, default=0.0
+        Mean used to invert node-index normalization.
+    feature_normalization_scale : float, default=1.0
+        Positive scale used to invert node-index normalization.
+
+    Attributes
+    ----------
+    covariance_matrix : torch.Tensor
+        Registered covariance buffer, moved with the kernel device.
+    jitter : float
+        Diagonal numerical adjustment.
+    normalize_features : bool
+        Whether inputs require inverse normalization.
+
+    Raises
+    ------
+    ImportError
+        If GPyTorch is unavailable.
+    ValueError
+        If covariance is not square or an enabled normalization scale is not
+        positive.
+
+    Notes
+    -----
+    Inputs are transductive graph-node indices, not continuous coordinates.
     """
 
     is_stationary = False
@@ -426,6 +576,31 @@ class DiffusionPriorKernel(_KernelBase):
         diag: bool = False,
         **params: Any,
     ):
+        """Select covariance entries for two node-index batches.
+
+        Parameters
+        ----------
+        x1 : torch.Tensor
+            Node indices, optionally normalized, with arbitrary batch shape.
+        x2 : torch.Tensor or None, optional
+            Second node-index collection. Defaults to ``x1``.
+        diag : bool, default=False
+            Return only the covariance diagonal.
+        **params : Any
+            Ignored GPyTorch kernel compatibility arguments.
+
+        Returns
+        -------
+        torch.Tensor
+            Covariance matrix with shape ``(x1.numel(), x2.numel())`` or its
+            diagonal when ``diag`` is true, on the covariance buffer device.
+
+        Raises
+        ------
+        ValueError
+            If an index collection is empty or contains nodes outside the
+            covariance matrix.
+        """
         del params
         if x2 is None:
             x2 = x1
@@ -446,12 +621,51 @@ class DiffusionPriorKernel(_KernelBase):
 
 
 class DiffusionPriorExactGP(_ExactGPBase):
-    """
-    Exact GP regressor whose covariance is induced by landscape diffusion scale.
+    """Regress fitness with a fixed landscape-diffusion covariance.
 
     This is intentionally a transductive model over a fixed graph: inputs are
     node indices, and the graph-derived covariance encodes the prior over all
     sequences already present in the landscape.
+
+    Parameters
+    ----------
+    train_x : torch.Tensor
+        Training node-index column on the intended model device.
+    train_y : torch.Tensor
+        One-dimensional finite training targets aligned with ``train_x``.
+    covariance_matrix : torch.Tensor
+        Square covariance over every node in the fixed landscape.
+    likelihood : Any, optional
+        GPyTorch likelihood. Defaults to ``GaussianLikelihood``.
+    mean_mode : {"constant", "zero"}, default="constant"
+        GP mean-function family.
+    jitter : float, default=1e-4
+        Diagonal kernel adjustment.
+    normalize_features : bool, default=False
+        Normalize scalar node-index inputs before evaluation.
+    feature_normalization_mean : float, default=0.0
+        Node-index normalization mean.
+    feature_normalization_scale : float, default=1.0
+        Positive node-index normalization scale.
+
+    Attributes
+    ----------
+    likelihood : Any
+        GPyTorch likelihood used for training and prediction.
+    mean_module : Any
+        Selected GPyTorch mean module.
+    covar_module : DiffusionPriorKernel
+        Fixed graph covariance kernel.
+    layer_kind : str
+        Output-adapter key ``"numeric"``.
+
+    Raises
+    ------
+    ImportError
+        If GPyTorch is unavailable.
+    ValueError
+        If mean mode is unknown or enabled normalization has a non-positive
+        scale.
     """
 
     layer_kind = "numeric"
@@ -507,6 +721,18 @@ class DiffusionPriorExactGP(_ExactGPBase):
         return (x - mean) / scale
 
     def forward(self, x: torch.Tensor):
+        """Construct the latent multivariate-normal distribution.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Node-index column on the model device.
+
+        Returns
+        -------
+        gpytorch.distributions.MultivariateNormal
+            Latent GP distribution with fixed landscape covariance.
+        """
         gp = _load_gpytorch()
         normalized_x = self._normalize_inputs(x)
         mean_x = self.mean_module(normalized_x)
@@ -514,6 +740,22 @@ class DiffusionPriorExactGP(_ExactGPBase):
         return gp.distributions.MultivariateNormal(mean_x, covar_x)
 
     def predict_distribution(self, inputs: torch.Tensor):
+        """Evaluate the predictive distribution in no-gradient mode.
+
+        Parameters
+        ----------
+        inputs : torch.Tensor
+            Node-index column on the model device.
+
+        Returns
+        -------
+        gpytorch.distributions.MultivariateNormal
+            Likelihood-transformed predictive distribution.
+
+        Notes
+        -----
+        The model and likelihood are placed in evaluation mode.
+        """
         gp = _load_gpytorch()
         self.eval()
         self.likelihood.eval()
@@ -521,9 +763,20 @@ class DiffusionPriorExactGP(_ExactGPBase):
             return self.likelihood(self(inputs))
 
     def predict(self, inputs: torch.Tensor) -> torch.Tensor:
+        """Return posterior mean fitness for node-index inputs.
+
+        Parameters
+        ----------
+        inputs : torch.Tensor
+            Node-index column on the model device.
+
+        Returns
+        -------
+        torch.Tensor
+            Posterior mean with one value per input node on the model device.
+        """
         posterior = self.predict_distribution(inputs)
         return posterior.mean
-
 
 def fit_diffusion_prior_gp(
     landscape: Any,
@@ -550,15 +803,81 @@ def fit_diffusion_prior_gp(
     mean_mode: str = "constant",
     device: Optional[str | torch.device] = None,
 ) -> DiffusionGPFitResult:
-    """
-    Fit an exact diffusion-prior GP on observed node fitness values.
+    """Fit an exact diffusion-prior GP on observed node fitness.
 
     This example is intended for small to medium landscapes where exact GP
     inference remains tractable. If ``train_indices`` is supplied, held-out
     finite targets remain available for evaluation but are not used for
     diffusion-scale fitting or GP likelihood optimization.
-    """
 
+    Parameters
+    ----------
+    landscape : Any
+        Landscapy fitness landscape with a fixed graph.
+    target_layer : str
+        Numeric fitness-layer name.
+    aggregate_func : callable or None, default=numpy.mean
+        Replicate aggregation function.
+    train_indices : sequence of int, torch.Tensor, or None, optional
+        Canonical nodes used for scale estimation and likelihood fitting.
+    mask_tokens : sequence of str, default=DEFAULT_MASK_TOKENS
+        Tokens treated as masked during scale estimation.
+    drop_masked_sequences_for_t_map : bool, default=True
+        Exclude masked training nodes when an estimable subset remains.
+    t_min : float, default=0.01
+        Minimum candidate diffusion scale.
+    t_max : float, default=100.0
+        Maximum candidate diffusion scale.
+    epsilon : float, default=1e-8
+        Numerical adjustment for diffusion estimation and covariance.
+    method : str, default="grid"
+        Landscapy diffusion-scale optimization method.
+    grid_size : int, default=256
+        Candidate count for grid optimization.
+    prior : str, default="log_uniform"
+        Diffusion-scale prior.
+    bootstrap_samples : int, default=200
+        Diffusion-scale bootstrap replicates.
+    random_state : int or None, optional
+        Diffusion-scale estimation seed.
+    min_signal_variance : float, default=1e-6
+        Lower bound for covariance signal variance.
+    normalize_features : bool, default=False
+        Normalize scalar node-index inputs.
+    feature_normalization_eps : float, default=1e-8
+        Minimum feature scale before replacement by one.
+    training_iters : int, default=100
+        Adam optimization iterations.
+    learning_rate : float, default=0.1
+        Adam learning rate.
+    jitter : float, default=1e-4
+        Kernel diagonal adjustment.
+    mean_mode : {"constant", "zero"}, default="constant"
+        GP mean-function family.
+    device : str, torch.device, or None, optional
+        Training device. Defaults to CPU.
+
+    Returns
+    -------
+    DiffusionGPFitResult
+        Fitted model, likelihood, full reproducibility artifacts, and loss
+        history.
+
+    Raises
+    ------
+    ImportError
+        If GPyTorch or required Landscapy analysis functionality is missing.
+    ValueError
+        If landscape artifacts, model settings, or training inputs are invalid.
+
+    Notes
+    -----
+    Exact GP time and memory scale cubically and quadratically with training
+    nodes, respectively. More than 2,000 training observations triggers a
+    resource warning. The graph, training subset, masking policy, diffusion
+    settings, and random state determine the scientific prior and must be
+    recorded with experimental results.
+    """
     gp = _load_gpytorch()
     artifacts = build_diffusion_gp_artifacts_from_landscape(
         landscape,
@@ -640,14 +959,35 @@ def attach_diffusion_gp_predictions(
     attach: bool = True,
     inplace: bool = True,
 ) -> Any:
-    """
-    Predict fitness at every landscape node and attach the mean as a numeric layer.
+    """Predict diffusion-GP fitness for every landscape node.
 
-    Returns the prediction layer when it is unattached or attached in place. With
-    ``attach=True, inplace=False``, returns a ``LandscapeInferenceResult`` containing
-    an independent landscape copy and its attached layer.
-    """
+    Parameters
+    ----------
+    landscape : Any
+        Fixed landscape used to define the GP covariance.
+    model : DiffusionPriorExactGP
+        Fitted transductive GP model.
+    layer_name : str, default="diffusion_gp_predicted_fitness"
+        Requested numeric prediction-layer name.
+    attach : bool, default=True
+        Attach the prediction layer to a landscape.
+    inplace : bool, default=True
+        Attach to the supplied landscape when true or an independent copy when
+        false. Ignored when ``attach`` is false.
 
+    Returns
+    -------
+    BaseFitnessLayer or LandscapeInferenceResult
+        Prediction layer when unattached or attached in place. For
+        ``attach=True, inplace=False``, the copied landscape and attached layer.
+
+    Raises
+    ------
+    ImportError
+        If Landscapy numeric fitness support is unavailable.
+    ValueError
+        If model outputs, node count, or attachment metadata is invalid.
+    """
     return infer_fitness_layer_from_landscape(
         landscape,
         model,

@@ -1,3 +1,5 @@
+"""Construct Lightning trainers and registry-driven training jobs."""
+
 from __future__ import annotations
 
 import inspect
@@ -204,6 +206,17 @@ class TrainingJob:
     trainer_factory: TrainerFactory = create_trainer
 
     def __post_init__(self) -> None:
+        """Validate registry keys after dataclass initialization.
+
+        Raises
+        ------
+        ValueError
+            If the requested model or data-builder name is unregistered.
+
+        Notes
+        -----
+        Built-in registry entries are initialized before validation.
+        """
         register_builtin_components()
         if self.model_name not in _MODEL_REGISTRY:
             raise ValueError(
@@ -274,6 +287,33 @@ class TrainingJob:
         return self.trainer_factory(**self.trainer_kwargs)
 
     def build(self) -> Tuple[pl.Trainer, pl.LightningModule, pl.LightningDataModule]:
+        """Construct the trainer, model, and initialized data module.
+
+        Returns
+        -------
+        trainer : pytorch_lightning.Trainer
+            Configured trainer.
+        model : pytorch_lightning.LightningModule
+            Model built from the registered factory.
+        datamodule : pytorch_lightning.LightningDataModule
+            Fit-stage data module built from the registered factory.
+
+        Raises
+        ------
+        RuntimeError
+            If required model feature width cannot be inferred.
+        TypeError
+            If model construction rejects the resolved keyword arguments.
+        ValueError
+            If split indices are unsupported, duplicated, or invalid.
+
+        Notes
+        -----
+        When ``seed`` is set, this method seeds Lightning before construction.
+        It also attempts to log run metadata and persist categorical label
+        mappings; failures in those auxiliary writes emit warnings rather than
+        aborting construction.
+        """
         if self.seed is not None:
             pl.seed_everything(self.seed, workers=True)
         dm = self._build_datamodule()
@@ -323,6 +363,24 @@ class TrainingJob:
         fit: bool = True,
         test: bool = False,
     ) -> Tuple[pl.Trainer, pl.LightningModule, pl.LightningDataModule]:
+        """Build a training job and optionally execute fit and test loops.
+
+        Parameters
+        ----------
+        fit : bool, default=True
+            Call ``trainer.fit`` after construction.
+        test : bool, default=False
+            Call ``trainer.test`` after optional fitting.
+
+        Returns
+        -------
+        trainer : pytorch_lightning.Trainer
+            Configured trainer after requested execution.
+        model : pytorch_lightning.LightningModule
+            Constructed model.
+        datamodule : pytorch_lightning.LightningDataModule
+            Initialized data module.
+        """
         trainer, model, dm = self.build()
         if fit:
             trainer.fit(model, datamodule=dm)

@@ -1,3 +1,5 @@
+"""Command-line interface for registered landscape regression workflows."""
+
 from __future__ import annotations
 
 import json
@@ -17,11 +19,13 @@ from .landscape_regression import (
 
 @click.group(help="landscapy-ml CLI (training utilities).")
 def cli() -> None:
+    """Expose landscapy-ml training and registry commands."""
     pass
 
 
 @cli.command("list", help="List registered models and data builders.")
 def list_registered() -> None:
+    """Print registered models, data builders, and regression runners."""
     import_builtin_examples()
     click.echo("Models:")
     for name in sorted(_MODEL_REGISTRY):
@@ -142,6 +146,66 @@ def train_landscape(
     moltype: str | None,
     continue_on_error: bool,
 ) -> None:
+    """Train registered landscape models for one or more CSV datasets.
+
+    Parameters
+    ----------
+    csv_path : tuple of pathlib.Path
+        Explicit CSV or compressed CSV inputs.
+    demo_root : pathlib.Path or None
+        Root searched for bundled dataset split files when ``csv_path`` is
+        empty.
+    model_key : str
+        Registered model or landscape-regression runner name.
+    data_name : str
+        Registered data-builder name for Lightning-backed models.
+    sequence_column : str
+        CSV column containing sequences.
+    target_column : str
+        CSV column containing numeric targets.
+    split_column : str
+        CSV column containing train and test labels.
+    validation_column : str
+        CSV column identifying validation rows within the training split.
+    train_label : str
+        Value in ``split_column`` that identifies training rows.
+    test_label : str
+        Value in ``split_column`` that identifies test rows.
+    output_suffix : str
+        Suffix used for JSON result files.
+    seed : int or None
+        Optional random seed passed to the regression workflow.
+    max_epochs : int
+        Maximum Lightning training epochs.
+    accelerator : str
+        Lightning accelerator selection.
+    devices : str
+        Lightning device count or device selection string.
+    model_kwargs : str
+        JSON object forwarded to the model factory.
+    data_kwargs : str
+        JSON object forwarded to the data builder.
+    trainer_kwargs : str
+        JSON object forwarded to the trainer factory.
+    fit_kwargs : str
+        JSON object forwarded to non-Lightning fit helpers.
+    tokenizer : str or None
+        Optional tokenizer identifier for graph inputs.
+    moltype : str or None
+        Sequence molecular type passed to Landscapy.
+    continue_on_error : bool
+        Continue processing later CSV files after an input fails.
+
+    Returns
+    -------
+    None
+        Results are emitted through Click and written by the selected runner.
+
+    Raises
+    ------
+    click.ClickException
+        If a JSON option does not decode to an object.
+    """
     parsed_devices: int | str
     try:
         parsed_devices = int(devices)
@@ -180,6 +244,18 @@ def train_landscape(
 
 
 def main(argv: List[str] | None = None) -> int:
+    """Run the command-line interface without forcing process termination.
+
+    Parameters
+    ----------
+    argv : list of str or None, optional
+        Command-line arguments. ``None`` delegates argument discovery to Click.
+
+    Returns
+    -------
+    int
+        Process-style exit status reported by Click.
+    """
     try:
         cli.main(args=argv, prog_name="landscapyml", standalone_mode=False)
     except SystemExit as exc:  # click exits via SystemExit

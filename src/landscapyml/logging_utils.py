@@ -1,3 +1,5 @@
+"""Logging configuration shared by landscapy-ml workflows."""
+
 from __future__ import annotations
 
 import logging

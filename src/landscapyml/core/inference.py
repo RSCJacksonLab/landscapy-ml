@@ -1,3 +1,5 @@
+"""Run model inference and convert predictions into Landscapy layers."""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -34,6 +36,13 @@ except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
 @dataclass(frozen=True)
 class LandscapeInferenceResult:
     """Hold a copied landscape and the prediction layer attached to it.
+
+    Parameters
+    ----------
+    landscape : FitnessLandscape
+        Independent landscape copy containing ``layer``.
+    layer : BaseFitnessLayer
+        Prediction layer attached to ``landscape``.
 
     Attributes
     ----------
@@ -87,33 +96,44 @@ def predict_sequences(
     device: Optional[str] = None,
     embedding_batch_size: int = 32,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Embed raw sequences and predict class probabilities with uncertainty.
+    """Embed raw sequences and predict probabilities with uncertainty.
 
     Parameters
     ----------
     model : Any
         Trained classifier implementing ``predict_with_uncertainty``.
-    sequences : Sequence[Any]
+    sequences : sequence of Any
         Raw sequences to embed and classify.
     embedding_mode : str, default="hard"
         Embedding strategy for raw sequences.
     model_name : str, default="facebook/esm2_t6_8M_UR50D"
         Model identifier used by landscapy embedders.
-    device : str, optional
-        Device string forwarded to the embedder.
+    device : str or None, optional
+        Device forwarded to the embedder. Model execution uses the model's
+        declared or first-parameter device, with a CPU fallback.
     embedding_batch_size : int, default=32
         Batch size used during embedding.
 
     Returns
     -------
-    tuple[torch.Tensor, torch.Tensor]
-        Mean class probabilities and variance tensors on CPU.
+    mean_probabilities : torch.Tensor
+        Detached CPU prediction tensor retaining model output shape and dtype.
+    variance : torch.Tensor
+        Detached CPU uncertainty tensor with the same shape as the mean.
 
     Raises
     ------
     ValueError
-        If ``sequences`` is empty or the model returns incompatible outputs.
+        If ``sequences`` is empty or outputs have invalid count, shape, or batch
+        dimension.
+    TypeError
+        If either model output is not a tensor.
+
+    Notes
+    -----
+    The model is placed in evaluation mode and invoked under
+    :func:`torch.inference_mode`. Raw-sequence embedding may download external
+    model weights through Landscapy.
     """
     if len(sequences) == 0:
         raise ValueError("sequences must contain at least one input.")
@@ -141,26 +161,35 @@ def predict_landscape_records(
     model: Any,
     records: Iterable[Mapping[str, Any]],
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Run inference on FitnessLandscape record dictionaries.
+    """Predict probabilities from Landscapy record dictionaries.
 
     Parameters
     ----------
     model : Any
         Trained classifier implementing ``predict_with_uncertainty``.
-    records : Iterable[Mapping[str, Any]]
+    records : iterable of mappings
         Iterable of record dictionaries containing ``embedding`` or ``sequence_tensor``.
 
     Returns
     -------
-    tuple[torch.Tensor, torch.Tensor]
-        Mean class probabilities and variance tensors on CPU.
+    mean_probabilities : torch.Tensor
+        Detached CPU prediction tensor retaining model output shape and dtype.
+    variance : torch.Tensor
+        Detached CPU uncertainty tensor with the same shape as the mean.
 
     Raises
     ------
     ValueError
         If no records are supplied, a record lacks the required feature fields,
         feature shapes differ, or the model returns incompatible outputs.
+    TypeError
+        If a record is not a mapping or either model output is not a tensor.
+
+    Notes
+    -----
+    Record features are converted to ``float32`` and stacked on a new leading
+    batch axis. The model's declared or first-parameter device is used, with a
+    CPU fallback, and prediction runs under :func:`torch.inference_mode`.
     """
     model.eval()
     feats: list[torch.Tensor] = []
@@ -211,8 +240,7 @@ def infer_fitness_layer_from_landscape(
     input_adapter: LandscapeInputAdapter | str | None = None,
     input_adapter_kwargs: Optional[Mapping[str, Any]] = None,
 ) -> BaseFitnessLayer | LandscapeInferenceResult:
-    """
-    Run inference on a ``FitnessLandscape`` and construct a predicted fitness layer.
+    """Infer and optionally attach a predicted fitness layer.
 
     Parameters
     ----------
@@ -224,7 +252,7 @@ def infer_fitness_layer_from_landscape(
         Batch size for inference DataLoader.
     num_workers : int, default=0
         Number of DataLoader workers.
-    device : str, optional
+    device : str or None, optional
         Device to place model inputs on; defaults to the model device.
     attach : bool, default=True
         Whether to attach the resulting layer to the landscape.
@@ -234,11 +262,11 @@ def infer_fitness_layer_from_landscape(
         is false.
     layer_name : str, default="predicted_fitness"
         Name assigned to the created layer.
-    categories : Sequence[str], optional
+    categories : sequence of str or None, optional
         Optional category names; defaults to inferred class indices.
-    input_adapter : LandscapeInputAdapter | str, optional
+    input_adapter : LandscapeInputAdapter, str, or None, optional
         Adapter used to extract model inputs from the landscape.
-    input_adapter_kwargs : Mapping[str, Any], optional
+    input_adapter_kwargs : mapping of str to Any or None, optional
         Optional kwargs used to construct the input adapter when a name is provided.
 
     Returns
@@ -254,6 +282,15 @@ def infer_fitness_layer_from_landscape(
         If the model type is unsupported or embedding compatibility checks fail.
     RuntimeError
         If the input adapter cannot supply model inputs.
+
+    Notes
+    -----
+    Prediction executes without gradient recording. Output batches are
+    detached and moved to CPU before layer conversion. With in-place
+    attachment, ``landscape`` is mutated and the layer is returned. Copy-mode
+    attachment deep-copies the landscape, leaves the original unchanged, and
+    returns both objects in ``LandscapeInferenceResult``. Collision-safe layer
+    naming is resolved on the actual attachment target.
     """
     model_adapter = resolve_model_adapter(model)
     layer_kind = model_adapter.layer_kind

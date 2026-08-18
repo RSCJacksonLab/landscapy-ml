@@ -1,3 +1,5 @@
+"""PyTorch datasets and Lightning data modules for Landscapy records."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -28,13 +30,35 @@ CollateFn = Callable[[list[Any]], Any]
 
 
 class LandscapeDataset(Dataset):
-    """
-    Generic dataset for landscapy record dictionaries.
+    """Represent Landscapy record dictionaries as a PyTorch dataset.
 
     Records preserve the landscapy boundary: a sequence view under
     ``sequence_tensor`` or ``embedding`` plus one or more labels in
     ``fitness_tensors``. Task-specific datasets provide only input and target
     getters; they do not need to know how the landscape was constructed.
+
+    Parameters
+    ----------
+    records : sequence of mappings
+        Non-empty per-sequence record collection.
+    input_getter : callable or None, optional
+        Function extracting model inputs. The default prefers embeddings over
+        sequence tensors.
+    target_getter : callable or None, optional
+        Function extracting supervised targets. Omit for prediction-only data.
+    return_format : {"tuple", "dict"}, default="tuple"
+        Return inputs and targets as tuples or named dictionary entries.
+
+    Attributes
+    ----------
+    records : list of dict
+        Shallow copies of the supplied record mappings.
+    input_getter : callable
+        Active input extraction function.
+    target_getter : callable or None
+        Active target extraction function.
+    return_format : str
+        Selected item representation.
     """
 
     def __init__(
@@ -55,9 +79,29 @@ class LandscapeDataset(Dataset):
         self.return_format = return_format
 
     def __len__(self) -> int:
+        """Return the number of landscape records.
+
+        Returns
+        -------
+        int
+            Number of records in the dataset.
+        """
         return len(self.records)
 
     def __getitem__(self, idx: int):
+        """Extract model inputs and optional targets for one record.
+
+        Parameters
+        ----------
+        idx : int
+            Zero-based record index.
+
+        Returns
+        -------
+        Any
+            Inputs alone, an ``(inputs, targets)`` tuple, or a dictionary as
+            selected by ``return_format``.
+        """
         record = self.records[idx]
         inputs = self.input_getter(record)
 
@@ -73,8 +117,45 @@ class LandscapeDataset(Dataset):
 
 
 class LandscapeDataModule(pl.LightningDataModule):
-    """
-    Generic Lightning ``DataModule`` for landscapy-derived record datasets.
+    """Manage Landscapy-derived record datasets for Lightning.
+
+    Parameters
+    ----------
+    train_data : Any
+        Non-empty batched records or iterable of training records.
+    val_data : Any, optional
+        Validation records.
+    test_data : Any, optional
+        Test records.
+    predict_data : Any, optional
+        Prediction-only records.
+    batch_size : int, default=32
+        DataLoader batch size.
+    num_workers : int, default=0
+        DataLoader worker-process count.
+    pin_memory : bool, default=False
+        Enable pinned host memory in DataLoaders.
+    shuffle : bool, default=True
+        Shuffle the training loader.
+    val_split : float, default=0.0
+        Fraction of training records moved to validation when no validation
+        data are supplied.
+    val_seed : int or None, optional
+        Seed for the optional validation split.
+    dataset_factory : callable, default=LandscapeDataset
+        Factory constructing datasets from normalized records.
+    dataset_kwargs : mapping or None, optional
+        Keyword arguments for fit and test datasets.
+    predict_dataset_kwargs : mapping or None, optional
+        Keyword arguments for prediction datasets. Defaults to
+        ``dataset_kwargs``.
+    collate_fn : callable or None, optional
+        Optional DataLoader collation function.
+
+    Attributes
+    ----------
+    train_records, val_records, test_records, predict_records : list of dict
+        Materialized records for each stage.
     """
 
     def __init__(
@@ -154,6 +235,23 @@ class LandscapeDataModule(pl.LightningDataModule):
         return self.dataset_factory(records, **kwargs)
 
     def setup(self, stage: Optional[str] = None) -> None:
+        """Construct datasets required for a Lightning stage.
+
+        Parameters
+        ----------
+        stage : {"fit", "test", "predict"} or None, optional
+            Stage to initialize. ``None`` initializes every stage.
+
+        Returns
+        -------
+        None
+            Datasets are stored on the data module.
+
+        Notes
+        -----
+        The optional validation split mutates the module's in-memory training
+        and validation record lists once during fit setup.
+        """
         if stage in (None, "fit"):
             if not self.val_records and self.val_split > 0:
                 rng = torch.Generator().manual_seed(self.val_seed or 0)
@@ -199,18 +297,51 @@ class LandscapeDataModule(pl.LightningDataModule):
         )
 
     def train_dataloader(self) -> DataLoader:
+        """Return the initialized, optionally shuffled training loader.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            Training DataLoader.
+
+        Raises
+        ------
+        RuntimeError
+            If fit setup has not initialized the training dataset.
+        """
         loader = self._loader(self._train_ds, shuffle=self.shuffle)
         if loader is None:
             raise RuntimeError("Training dataset was not initialized.")
         return loader
 
     def val_dataloader(self) -> Optional[DataLoader]:
+        """Return the validation loader.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader or None
+            Validation loader, or ``None`` when no validation data exist.
+        """
         return self._loader(self._val_ds)
 
     def test_dataloader(self) -> Optional[DataLoader]:
+        """Return the test loader.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader or None
+            Test loader, or ``None`` when no test data exist.
+        """
         return self._loader(self._test_ds)
 
     def predict_dataloader(self) -> Optional[DataLoader]:
+        """Return the prediction loader.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader or None
+            Prediction loader, or ``None`` when no prediction data exist.
+        """
         return self._loader(self._predict_ds)
 
 
@@ -225,8 +356,12 @@ def _graph_record_getter(record: Mapping[str, Any]) -> Any:
 
 
 class LandscapeGraphDataset(LandscapeDataset):
-    """
-    Dataset specialization for single-graph landscape regression.
+    """Represent one full landscape graph as a single dataset item.
+
+    Parameters
+    ----------
+    records : sequence of mappings
+        Non-empty records containing a ``graph`` entry.
     """
 
     def __init__(self, records: Sequence[Mapping[str, Any]]) -> None:
@@ -262,15 +397,61 @@ def build_regression_graph_from_landscape(
     normalize_features: bool = False,
     feature_normalization_eps: float = 1e-8,
 ) -> Any:
-    """
-    Build a PyG-style single-graph regression object from a ``FitnessLandscape``.
+    """Build a PyG-style regression graph from a fitness landscape.
 
     Known numeric fitness values become supervised targets. Unknown values
     should be encoded as ``NaN`` in the source layer. Predefined
     train/validation/test indices can be supplied; otherwise finite targets are
     randomly split using ``val_fraction`` and ``test_fraction``.
-    """
 
+    Parameters
+    ----------
+    landscape : Any
+        Landscapy object exposing a graph tensor export or graph and sequences.
+    target_layer : str
+        Name of the numeric fitness layer used as ``graph.y``.
+    tokenizer : Any, str, or None, optional
+        Tokenizer forwarded to ``landscape.to_graph_tensor``.
+    aggregate_func : callable or None, default=numpy.mean
+        Replicate aggregation function for the numeric target layer.
+    val_fraction : float, default=0.0
+        Fraction of finite targets sampled for validation.
+    test_fraction : float, default=0.0
+        Fraction of finite targets sampled for testing.
+    train_indices : sequence of int, torch.Tensor, or None, optional
+        Explicit training node indices.
+    val_indices : sequence of int, torch.Tensor, or None, optional
+        Explicit validation node indices.
+    test_indices : sequence of int, torch.Tensor, or None, optional
+        Explicit test node indices.
+    seed : int or None, optional
+        Random split seed.
+    normalize_features : bool, default=False
+        Attach training-row feature mean and scale tensors to the graph.
+    feature_normalization_eps : float, default=1e-8
+        Minimum feature scale before replacement by one.
+
+    Returns
+    -------
+    Any
+        PyTorch Geometric-style graph carrying ``x``, ``edge_index``, ``y``,
+        known/train/validation/test/prediction masks, and optional feature
+        normalization tensors. Targets and generated features are ``float32``.
+
+    Raises
+    ------
+    ImportError
+        If fallback graph conversion requires unavailable PyTorch Geometric.
+    ValueError
+        If the landscape, target layer, split fractions, targets, or indices
+        violate the graph-regression contract.
+
+    Notes
+    -----
+    Explicit split indices are node positions in the landscape's canonical
+    sequence order. Graph construction and split choice remain scientific
+    inputs supplied by the caller.
+    """
     if not hasattr(landscape, "to_graph_tensor") and not hasattr(landscape, "graph"):
         raise ValueError("Landscape must implement to_graph_tensor() or expose a graph.")
     layers = getattr(landscape, "fitness_layers", None)
@@ -376,8 +557,27 @@ def _graph_tensor_from_landscape_graph(landscape: Any) -> Any:
 
 
 class LandscapeGraphRegressionDataModule(LandscapeDataModule):
-    """
-    DataModule for node-level regression on a single fitness landscape graph.
+    """Manage a single full graph for node-level landscape regression.
+
+    Parameters
+    ----------
+    train_graph : Any
+        Graph containing training masks and targets.
+    val_graph : Any, optional
+        Validation graph, commonly the same object as ``train_graph``.
+    test_graph : Any, optional
+        Test graph, commonly the same object as ``train_graph``.
+    predict_graph : Any, optional
+        Graph used for prediction.
+    num_workers : int, default=0
+        DataLoader worker-process count.
+    pin_memory : bool, default=False
+        Enable pinned host memory.
+
+    Attributes
+    ----------
+    train_graph, val_graph, test_graph, predict_graph : Any
+        Full-graph objects assigned to each Lightning stage.
     """
 
     def __init__(
@@ -426,6 +626,45 @@ class LandscapeGraphRegressionDataModule(LandscapeDataModule):
         num_workers: int = 0,
         pin_memory: bool = False,
     ) -> "LandscapeGraphRegressionDataModule":
+        """Build a regression graph and wrap it in a data module.
+
+        Parameters
+        ----------
+        landscape : Any
+            Landscapy fitness landscape.
+        target_layer : str
+            Numeric fitness layer used as the supervised target.
+        tokenizer : Any, str, or None, optional
+            Tokenizer forwarded to graph tensor export.
+        aggregate_func : callable or None, default=numpy.mean
+            Replicate aggregation function.
+        val_fraction : float, default=0.0
+            Fraction of finite targets sampled for validation.
+        test_fraction : float, default=0.0
+            Fraction of finite targets sampled for testing.
+        train_indices : sequence of int, torch.Tensor, or None, optional
+            Explicit training node indices.
+        val_indices : sequence of int, torch.Tensor, or None, optional
+            Explicit validation node indices.
+        test_indices : sequence of int, torch.Tensor, or None, optional
+            Explicit test node indices.
+        seed : int or None, optional
+            Random split seed.
+        normalize_features : bool, default=False
+            Compute feature statistics from training nodes.
+        feature_normalization_eps : float, default=1e-8
+            Minimum non-unit feature scale.
+        num_workers : int, default=0
+            DataLoader worker-process count.
+        pin_memory : bool, default=False
+            Enable pinned host memory.
+
+        Returns
+        -------
+        LandscapeGraphRegressionDataModule
+            Data module sharing the constructed graph across applicable
+            training, validation, test, and prediction stages.
+        """
         graph = build_regression_graph_from_landscape(
             landscape,
             target_layer=target_layer,

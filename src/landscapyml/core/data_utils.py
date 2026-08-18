@@ -1,3 +1,5 @@
+"""Utilities for normalizing Landscapy records, features, targets, and splits."""
+
 from __future__ import annotations
 
 import logging
@@ -16,10 +18,26 @@ LabelLike = Union[int, Sequence[int], torch.Tensor]
 
 
 def expand_record_batch(batch: Mapping[str, Any]) -> list[LandscapeRecord]:
-    """
-    Convert a batched landscapy tensor export into per-record dictionaries.
-    """
+    """Convert a batched Landscapy tensor export into individual records.
 
+    Parameters
+    ----------
+    batch : mapping of str to Any
+        Batched export containing ``sequence_tensor`` and a
+        ``fitness_tensors`` mapping. Optional ``attention_mask`` and
+        ``embedding`` arrays are split along their leading dimension.
+
+    Returns
+    -------
+    list of dict
+        Per-sequence record dictionaries whose tensor values retain their
+        original trailing shapes and dtypes.
+
+    Raises
+    ------
+    ValueError
+        If required sequence or fitness fields are absent.
+    """
     if "sequence_tensor" not in batch or "fitness_tensors" not in batch:
         raise ValueError(
             "Batch dictionary must contain 'sequence_tensor' and 'fitness_tensors'."
@@ -49,10 +67,24 @@ def expand_record_batch(batch: Mapping[str, Any]) -> list[LandscapeRecord]:
 
 
 def normalize_records(data: Any) -> list[LandscapeRecord]:
-    """
-    Normalize supported landscape record inputs into a list of records.
-    """
+    """Normalize supported landscape record inputs into a record list.
 
+    Parameters
+    ----------
+    data : Any
+        Batched record mapping, iterable of record mappings, or ``None``.
+
+    Returns
+    -------
+    list of dict
+        Materialized records. ``None`` and empty iterables produce an empty
+        list.
+
+    Raises
+    ------
+    ValueError
+        If ``data`` is not a supported batched or iterable representation.
+    """
     if data is None:
         return []
     if isinstance(data, Mapping):
@@ -71,6 +103,27 @@ def normalize_records(data: Any) -> list[LandscapeRecord]:
 def make_preferred_input_getter(
     *feature_keys: str, cast_float: bool = True
 ) -> InputGetter:
+    """Build a getter that selects the first available feature view.
+
+    Parameters
+    ----------
+    *feature_keys : str
+        Ordered record keys to inspect. Defaults to ``embedding`` followed by
+        ``sequence_tensor``.
+    cast_float : bool, default=True
+        Convert non-floating tensors to the default floating dtype.
+
+    Returns
+    -------
+    callable
+        Function mapping one record to a PyTorch tensor without changing its
+        shape or device.
+
+    Raises
+    ------
+    ValueError
+        Raised by the returned getter when none of the requested fields exist.
+    """
     keys = feature_keys or ("embedding", "sequence_tensor")
 
     def _getter(record: Mapping[str, Any]) -> torch.Tensor:
@@ -95,6 +148,29 @@ def make_fitness_target_getter(
     dtype: Optional[torch.dtype] = None,
     squeeze: bool = True,
 ) -> TargetGetter:
+    """Build a getter for one named fitness target.
+
+    Parameters
+    ----------
+    layer_name : str
+        Key selected from each record's ``fitness_tensors`` mapping.
+    collapse_one_hot : bool, default=False
+        Replace a multi-value target by its final-axis ``argmax`` index.
+    dtype : torch.dtype or None, optional
+        Optional output dtype.
+    squeeze : bool, default=True
+        Remove singleton dimensions from the returned tensor.
+
+    Returns
+    -------
+    callable
+        Function mapping a record to the selected target tensor.
+
+    Raises
+    ------
+    ValueError
+        Raised by the returned getter when the requested layer is absent.
+    """
     def _getter(record: Mapping[str, Any]) -> torch.Tensor:
         fitness = record.get("fitness_tensors")
         if not isinstance(fitness, Mapping) or layer_name not in fitness:
@@ -118,10 +194,30 @@ def _pad_tokens(
     *,
     pad_value: Union[int, float],
 ) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
-    """
-    Pad token and attention tensors to a shared sequence length.
-    """
+    """Pad token and attention tensors to a shared sequence length.
 
+    Parameters
+    ----------
+    tokens : list of torch.Tensor
+        Per-sequence token tensors with sequence length on axis zero.
+    masks : list of torch.Tensor or None
+        Per-sequence one-dimensional attention masks aligned with ``tokens``.
+    pad_value : int or float
+        Value used to pad token tensors. Masks are always padded with zero.
+
+    Returns
+    -------
+    padded_tokens : list of torch.Tensor
+        Token tensors padded to the longest sequence while preserving dtype
+        and device.
+    padded_masks : list of torch.Tensor
+        Integer attention masks padded to the same sequence length.
+
+    Raises
+    ------
+    RuntimeError
+        If any token or attention-mask entry is missing.
+    """
     max_len = max(int(t.shape[0]) for t in tokens if t is not None)
     padded_tokens: list[torch.Tensor] = []
     padded_masks: list[torch.Tensor] = []
@@ -154,10 +250,49 @@ def embed_sequences(
     embedding_batch_size: int = 32,
     include_tokens: bool = True,
 ) -> tuple[torch.Tensor, Optional[list[torch.Tensor]], Optional[list[torch.Tensor]]]:
-    """
-    Embed raw sequences using landscapy's ESM embedders.
-    """
+    """Embed raw sequences using Landscapy ESM embedders.
 
+    Parameters
+    ----------
+    sequences : sequence of sequence-like
+        Hard token sequences or relaxed tensors accepted by the selected
+        Landscapy embedder.
+    embedding_mode : {"hard", "soft"}, default="hard"
+        Select hard-token or relaxed-sequence embedding.
+    model_name : str, default="facebook/esm2_t6_8M_UR50D"
+        Hugging Face ESM model identifier.
+    device : str or None, optional
+        Device passed to the Landscapy embedder.
+    embedding_batch_size : int, default=32
+        Number of sequences processed per embedding batch.
+    include_tokens : bool, default=True
+        Return padded tokens and masks for hard-token embedding. Soft mode
+        disables this option with a warning.
+
+    Returns
+    -------
+    embeddings : torch.Tensor
+        CPU ``float32`` tensor with shape ``(n_sequences, embedding_dim)``.
+    tokens : list of torch.Tensor or None
+        CPU token tensors padded to a shared length, or ``None`` when tokens
+        were not requested.
+    attention_masks : list of torch.Tensor or None
+        CPU integer masks aligned with ``tokens``, or ``None``.
+
+    Raises
+    ------
+    ValueError
+        If the sequence collection is empty or ``embedding_mode`` is invalid.
+    ImportError
+        If Landscapy embedding dependencies cannot be imported.
+    RuntimeError
+        If embedding or tokenization omits any requested sequence.
+
+    Notes
+    -----
+    Model weights are external versioned inputs and may be downloaded by the
+    underlying Landscapy embedder when not already cached.
+    """
     if include_tokens and embedding_mode != "hard":
         warnings.warn(
             "include_tokens=True is only supported for hard tokenization; disabling tokens.",
@@ -257,10 +392,37 @@ def embed_sequences_to_records(
     embedding_batch_size: int = 32,
     include_tokens: bool = True,
 ) -> list[dict[str, Any]]:
-    """
-    Embed raw sequences and emit FitnessLandscape-compatible record dictionaries.
-    """
+    """Embed sequences and construct Landscapy-compatible ML records.
 
+    Parameters
+    ----------
+    sequences : sequence of sequence-like
+        Inputs accepted by :func:`embed_sequences`.
+    labels : sequence of label-like
+        Fitness labels aligned one-to-one with ``sequences``.
+    label_key : str
+        Non-empty key used in each record's ``fitness_tensors`` mapping.
+    embedding_mode : {"hard", "soft"}, default="hard"
+        Select hard-token or relaxed-sequence embedding.
+    model_name : str, default="facebook/esm2_t6_8M_UR50D"
+        Hugging Face ESM model identifier.
+    device : str or None, optional
+        Device passed to the Landscapy embedder.
+    embedding_batch_size : int, default=32
+        Number of sequences processed per embedding batch.
+    include_tokens : bool, default=True
+        Include padded hard-token tensors and attention masks.
+
+    Returns
+    -------
+    list of dict
+        Records containing sequence inputs, embeddings, and fitness tensors.
+
+    Raises
+    ------
+    ValueError
+        If sequence and label counts differ or ``label_key`` is empty.
+    """
     sequence_count = len(sequences)
     label_count = len(labels)
     if sequence_count != label_count:
@@ -297,6 +459,26 @@ def embed_sequences_to_records(
 def aggregate_numeric_targets(
     layer: Any, *, aggregate_func: Optional[Callable[..., Any]] = np.mean
 ) -> np.ndarray:
+    """Convert a numeric fitness layer to one scalar target per sequence.
+
+    Parameters
+    ----------
+    layer : Any
+        Landscapy numeric fitness layer implementing ``to_scalar``.
+    aggregate_func : callable or None, default=numpy.mean
+        Function used by replicate-valued layers. ``None`` requests the
+        layer's default scalar conversion.
+
+    Returns
+    -------
+    numpy.ndarray
+        One-dimensional floating array with one target per sequence.
+
+    Raises
+    ------
+    ValueError
+        If ``layer`` is not declared numeric.
+    """
     if getattr(layer, "dtype", None) != "numeric":
         raise ValueError("Landscape graph regression supports numeric fitness layers only.")
     if aggregate_func is None:
@@ -310,6 +492,20 @@ def aggregate_numeric_targets(
 
 
 def build_mask(num_nodes: int, indices: torch.Tensor) -> torch.Tensor:
+    """Construct a Boolean node mask from integer indices.
+
+    Parameters
+    ----------
+    num_nodes : int
+        Length of the output mask.
+    indices : torch.Tensor
+        Integer indices to mark true.
+
+    Returns
+    -------
+    torch.Tensor
+        CPU Boolean tensor with shape ``(num_nodes,)``.
+    """
     mask = torch.zeros(num_nodes, dtype=torch.bool)
     if indices.numel() > 0:
         mask[indices] = True
@@ -322,6 +518,30 @@ def feature_normalization_stats(
     mask: torch.Tensor | None = None,
     eps: float = 1e-8,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute per-feature normalization statistics.
+
+    Parameters
+    ----------
+    x : torch.Tensor
+        Node-feature matrix with shape ``(n_nodes, n_features)``.
+    mask : torch.Tensor or None, optional
+        Boolean node mask restricting the rows used for estimation.
+    eps : float, default=1e-8
+        Minimum standard deviation; smaller scales are replaced by one.
+
+    Returns
+    -------
+    mean : torch.Tensor
+        Detached per-feature means on the input device.
+    scale : torch.Tensor
+        Detached population standard deviations on the input device.
+
+    Raises
+    ------
+    ValueError
+        If features are not two-dimensional, the mask is misaligned, or any
+        selected value is non-finite.
+    """
     features = torch.as_tensor(x, dtype=torch.float32)
     if features.ndim != 2:
         raise ValueError("Graph node features must be a 2D tensor.")
@@ -345,13 +565,26 @@ def sequence_composition_features(
     *,
     alphabet: Optional[Sequence[Any]] = None,
 ) -> np.ndarray:
-    """
-    Build simple variable-length-safe sequence features.
+    """Build variable-length-safe sequence composition features.
 
     The first feature is normalized length; remaining features are residue/token
     frequencies over either the supplied alphabet or the observed symbols.
-    """
 
+    Parameters
+    ----------
+    sequences : sequence of Any
+        Sequence objects implementing ``to_array`` or iterable raw sequences.
+    alphabet : sequence of Any or None, optional
+        Ordered symbols defining composition columns. Observed symbols in
+        lexical order are used when omitted.
+
+    Returns
+    -------
+    numpy.ndarray
+        Floating matrix with shape ``(n_sequences, 1 + n_symbols)``. The first
+        column is length normalized by the longest input; remaining columns
+        are within-sequence symbol frequencies.
+    """
     arrays: list[list[str]] = []
     observed: list[str] = []
     seen: set[str] = set()
@@ -431,6 +664,48 @@ def resolve_split_indices(
     test_fraction: float = 0.0,
     seed: Optional[int] = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Resolve disjoint train, validation, and test node indices.
+
+    Parameters
+    ----------
+    num_nodes : int
+        Total number of landscape nodes.
+    known_idx : torch.Tensor
+        Indices with finite supervised targets.
+    train_indices : sequence of int, torch.Tensor, or None, optional
+        Explicit training indices.
+    val_indices : sequence of int, torch.Tensor, or None, optional
+        Explicit validation indices.
+    test_indices : sequence of int, torch.Tensor, or None, optional
+        Explicit test indices.
+    val_fraction : float, default=0.0
+        Fraction sampled for validation when explicit validation indices are
+        absent.
+    test_fraction : float, default=0.0
+        Fraction sampled for testing when explicit test indices are absent.
+    seed : int or None, optional
+        Seed for deterministic sampling.
+
+    Returns
+    -------
+    train_idx : torch.Tensor
+        Unique integer training indices.
+    val_idx : torch.Tensor
+        Unique integer validation indices.
+    test_idx : torch.Tensor
+        Unique integer test indices.
+
+    Raises
+    ------
+    ValueError
+        If supplied indices are invalid, overlap, include unknown targets, or
+        leave no training node.
+
+    Notes
+    -----
+    Sampling changes only split membership. It does not inspect target values
+    beyond the caller-provided finite-target index set.
+    """
     explicit_train = _as_index_tensor(
         train_indices, num_nodes=num_nodes, name="train_indices"
     )
