@@ -1,5 +1,7 @@
 # landscapy-ml
 
+[![CI](https://github.com/RSCJacksonLab/landscapy-ml/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/RSCJacksonLab/landscapy-ml/actions/workflows/ci.yml)
+
 `landscapy-ml` is the small bridge between `landscapy` `FitnessLandscape`
 objects and PyTorch models. The package focuses on one path:
 
