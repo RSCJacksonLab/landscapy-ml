@@ -179,6 +179,97 @@ def test_prob_categorical_output_adapter_builds_layer(monkeypatch):
     assert "variance" in layer.metadata
 
 
+def test_prob_categorical_output_adapter_detaches_tensors(monkeypatch):
+    class StubFitness:
+        def __init__(self, name, probabilities, categories, metadata):
+            self.name = name
+            self.probabilities = probabilities
+            self.categories = categories
+            self.metadata = metadata
+
+    monkeypatch.setattr(
+        "landscapyml.core.adaptor.ProbabilisticCategoricalFitness", StubFitness
+    )
+    mean = torch.tensor([[0.7, 0.3]], dtype=torch.float64, requires_grad=True)
+    var = torch.tensor([[0.05, 0.02]], dtype=torch.float64, requires_grad=True)
+
+    layer = ProbCategoricalOutputAdapter().to_layer(
+        {"mean": mean, "var": var},
+        ["yes", "no"],
+        {},
+        "layer_name",
+    )
+
+    assert layer.probabilities.shape == mean.shape
+    assert layer.probabilities.dtype == np.float64
+    assert layer.metadata["variance"].shape == var.shape
+    assert layer.metadata["variance"].dtype == np.float64
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available() and not torch.backends.mps.is_available(),
+    reason="No supported accelerator is available.",
+)
+def test_prob_categorical_output_adapter_moves_accelerator_tensors_to_cpu(
+    monkeypatch,
+):
+    class StubFitness:
+        def __init__(self, name, probabilities, categories, metadata):
+            self.name = name
+            self.probabilities = probabilities
+            self.categories = categories
+            self.metadata = metadata
+
+    monkeypatch.setattr(
+        "landscapyml.core.adaptor.ProbabilisticCategoricalFitness", StubFitness
+    )
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+    mean = torch.tensor([[0.7, 0.3]], device=device, requires_grad=True)
+    var = torch.tensor([[0.05, 0.02]], device=device, requires_grad=True)
+
+    layer = ProbCategoricalOutputAdapter().to_layer(
+        {"mean": mean, "var": var},
+        ["yes", "no"],
+        {},
+        "layer_name",
+    )
+
+    np.testing.assert_allclose(layer.probabilities, [[0.7, 0.3]])
+    np.testing.assert_allclose(layer.metadata["variance"], [[0.05, 0.02]])
+
+
+@pytest.mark.parametrize(
+    ("outputs", "error_type", "message"),
+    [
+        ({"mean": [[0.7, 0.3]]}, TypeError, "non-tensor 'mean'"),
+        ({"mean": torch.tensor([0.7, 0.3])}, ValueError, "expects 'mean'"),
+        (
+            {"mean": torch.tensor([[0.7, 0.3]]), "var": [[0.05, 0.02]]},
+            TypeError,
+            "non-tensor 'var'",
+        ),
+        (
+            {
+                "mean": torch.tensor([[0.7, 0.3]]),
+                "var": torch.tensor([[0.05], [0.02]]),
+            },
+            ValueError,
+            "same shape",
+        ),
+    ],
+)
+def test_prob_categorical_output_adapter_validates_tensor_shapes(
+    outputs, error_type, message
+):
+    with pytest.raises(error_type, match=message):
+        ProbCategoricalOutputAdapter().to_layer(
+            outputs,
+            ["yes", "no"],
+            {},
+            "layer_name",
+        )
+
+
 def test_output_adapter_registry_with_function_wrapper():
     register_layer_adapter(
         "custom_kind",
