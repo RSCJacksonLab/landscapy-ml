@@ -1,13 +1,12 @@
 import numpy as np
 import pytest
 import torch
-
 from landscapyml.core.inference import (
     infer_fitness_layer_from_landscape,
     predict_landscape_records,
     predict_sequences,
-    register_model_adapter,
     register_layer_adapter,
+    register_model_adapter,
     register_model_layer_mapping,
 )
 
@@ -224,6 +223,32 @@ def test_infer_fitness_layer_from_landscape_with_stub(monkeypatch):
     )
     assert isinstance(layer, StubFitness)
     assert hasattr(landscape, "_attached") and landscape._attached is layer
+
+
+def test_inference_propagates_safe_layer_name_errors(monkeypatch):
+    class StubFitness:
+        def __init__(self, name, probabilities, categories, metadata):
+            self.name = name
+
+    monkeypatch.setattr(
+        "landscapyml.core.adaptor.ProbabilisticCategoricalFitness", StubFitness
+    )
+
+    class BrokenNamingLandscape(DummyLandscape):
+        def safe_layer_name(self, name):  # noqa: ARG002
+            raise RuntimeError("layer registry is corrupt")
+
+    landscape = BrokenNamingLandscape(np.array([[1.0, 0.0]], dtype=float))
+    model = DummyProbModel(num_classes=2)
+    register_model_layer_mapping(DummyProbModel, "prob_categorical", overwrite=True)
+
+    with pytest.raises(RuntimeError, match="layer registry is corrupt"):
+        infer_fitness_layer_from_landscape(
+            landscape,
+            model,
+            attach=True,
+            categories=["a", "b"],
+        )
 
 
 def test_custom_layer_adapter_registration(monkeypatch):

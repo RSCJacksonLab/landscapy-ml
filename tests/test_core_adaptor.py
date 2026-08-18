@@ -4,7 +4,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
-
 from landscapyml.core.adaptor import (
     DefaultModelAdapter,
     EmbeddingInputAdapter,
@@ -13,15 +12,16 @@ from landscapyml.core.adaptor import (
     NodeIndexInputAdapter,
     NumericOutputAdapter,
     ProbCategoricalOutputAdapter,
+    infer_device,
     normalize_adapter_outputs,
     register_input_adapter,
     register_layer_adapter,
     register_model_adapter,
     register_model_layer_mapping,
+    resolve_embedding_info,
     resolve_input_adapter,
     resolve_model_adapter,
     resolve_output_adapter,
-    infer_device,
 )
 
 
@@ -149,6 +149,17 @@ def test_embedding_input_adapter_yields_batches_and_metadata():
     assert meta["input_adapter"] == "embedding"
     assert meta["embedding_model"] == "esm-test"
     assert meta["embedding_domain"] == "sequence"
+
+
+def test_resolve_embedding_info_propagates_metadata_errors():
+    class BrokenMetadataLandscape:
+        active_embedding_domain = "sequence"
+
+        def get_embedding_metadata(self, domain):  # noqa: ARG002
+            raise RuntimeError("metadata store is corrupt")
+
+    with pytest.raises(RuntimeError, match="metadata store is corrupt"):
+        resolve_embedding_info(BrokenMetadataLandscape())
 
 
 def test_graph_tensor_input_adapter_uses_landscape_graph_export():

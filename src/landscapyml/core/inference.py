@@ -4,6 +4,7 @@ from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
 
 import torch
 
+from ._optional import is_missing_optional_dependency
 from .adaptor import (
     LandscapeInputAdapter,
     ModelAdapter,
@@ -21,7 +22,9 @@ from .data_utils import embed_sequences
 try:
     from fitness_landscape.core.fitness import BaseFitnessLayer
     from fitness_landscape.core.landscape import FitnessLandscape
-except Exception:  # pragma: no cover - optional dependency
+except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+    if not is_missing_optional_dependency(exc, "fitness_landscape"):
+        raise
     FitnessLandscape = Any  # type: ignore
     BaseFitnessLayer = Any  # type: ignore
 
@@ -318,10 +321,7 @@ def infer_fitness_layer_from_landscape(
         target = landscape if inplace else landscape.copy()
         target_layer_name = layer_name
         if hasattr(landscape, "safe_layer_name"):
-            try:
-                target_layer_name = landscape.safe_layer_name(layer_name)
-            except Exception:
-                target_layer_name = layer_name
+            target_layer_name = landscape.safe_layer_name(layer_name)
         if hasattr(layer, "name"):
             layer.name = target_layer_name
         target.attach(layer=layer)

@@ -1,22 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
-
+import inspect
 import json
-from pathlib import Path
 import warnings
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning.loggers import TensorBoardLogger
 
+from ._optional import is_missing_optional_dependency
 from .model_registry import (
+    _DATA_REGISTRY,
+    _MODEL_REGISTRY,
     DataFactory,
     ModelFactory,
     ModelRegistryEntry,
-    _DATA_REGISTRY,
-    _MODEL_REGISTRY,
     build_external_model,
     factory_accepts_kwargs,
     normalize_split_indices,
@@ -107,7 +108,9 @@ def create_trainer(
     if use_wandb:
         try:
             from pytorch_lightning.loggers import WandbLogger
-        except Exception as exc:  # pragma: no cover - optional dependency
+        except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+            if not is_missing_optional_dependency(exc, "wandb"):
+                raise
             warnings.warn(
                 f"W&B logging requested but wandb is not available: {exc}. "
                 "Proceeding with TensorBoard only.",
@@ -127,7 +130,9 @@ def create_trainer(
                     tags=wandb_tags,
                     save_dir=wandb_dir,
                 )
-            except (ImportError, ModuleNotFoundError) as exc:
+            except ModuleNotFoundError as exc:
+                if not is_missing_optional_dependency(exc, "wandb"):
+                    raise
                 warnings.warn(
                     f"W&B logging requested but wandb is not available: {exc}. "
                     "Install landscapy-ml[tracking] to enable it. Proceeding "
@@ -233,9 +238,11 @@ class TrainingJob:
         dm = factory(**data_kwargs)
         # Ensure datasets are built before we inspect shapes or hand to Trainer.
         try:
-            dm.setup("fit")
-        except Exception:
+            inspect.signature(dm.setup).bind("fit")
+        except (TypeError, ValueError):
             dm.setup()
+        else:
+            dm.setup("fit")
         return dm
 
     def _infer_num_features(self, dm: pl.LightningDataModule) -> int:
@@ -288,8 +295,12 @@ class TrainingJob:
         ):
             try:
                 logger.log_hyperparams(metadata)
-            except Exception:
-                continue
+            except Exception as exc:
+                warnings.warn(
+                    f"Failed to log training metadata with "
+                    f"{type(logger).__name__}: {exc}",
+                    RuntimeWarning,
+                )
 
         # Persist label mapping next to checkpoints if available
         if label_mapping is not None:
@@ -299,8 +310,11 @@ class TrainingJob:
                 path.mkdir(parents=True, exist_ok=True)
                 with path.joinpath("label_mapping.json").open("w") as fh:
                     json.dump(list(label_mapping), fh)
-            except Exception:
-                pass
+            except Exception as exc:
+                warnings.warn(
+                    f"Failed to persist label mapping in {ckpt_dir!r}: {exc}",
+                    RuntimeWarning,
+                )
         return trainer, model, dm
 
     def run(

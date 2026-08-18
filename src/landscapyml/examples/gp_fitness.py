@@ -7,13 +7,19 @@ from typing import Any, Callable, Mapping, Optional, Sequence
 import numpy as np
 import torch
 
+from ..core._optional import is_missing_optional_dependency
 from ..core.adaptor import NodeIndexInputAdapter, register_input_adapter
 from ..core.inference import infer_fitness_layer_from_landscape
 
 try:
     import gpytorch  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
+except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+    if not is_missing_optional_dependency(exc, "gpytorch"):
+        raise
     gpytorch = None  # type: ignore
+    _GPYTORCH_IMPORT_ERROR: ModuleNotFoundError | None = exc
+else:
+    _GPYTORCH_IMPORT_ERROR = None
 
 try:
     from fitness_landscape.analysis.diffusion_scale import (
@@ -22,11 +28,16 @@ try:
     from fitness_landscape.core.fitness import NumericFitness
     from fitness_landscape.core.landscape import FitnessLandscape
     from fitness_landscape.transforms.eigenmode import eigenmode_decomposition
-except Exception:  # pragma: no cover - optional dependency
+except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+    if not is_missing_optional_dependency(exc, "fitness_landscape"):
+        raise
     compute_ruggedness_diffusion_scale = None  # type: ignore
     NumericFitness = Any  # type: ignore
     FitnessLandscape = Any  # type: ignore
     eigenmode_decomposition = None  # type: ignore
+    _LANDSCAPY_IMPORT_ERROR: ModuleNotFoundError | None = exc
+else:
+    _LANDSCAPY_IMPORT_ERROR = None
 
 
 DEFAULT_MASK_TOKENS: tuple[str, ...] = ("X", "?", "-", "gap")
@@ -36,7 +47,7 @@ def _load_gpytorch():
     if gpytorch is None:  # pragma: no cover - optional dependency
         raise ImportError(
             "GP fitness examples require gpytorch to be installed."
-        )
+        ) from _GPYTORCH_IMPORT_ERROR
     return gpytorch
 
 
@@ -44,7 +55,7 @@ def _require_landscapy_bits() -> None:
     if compute_ruggedness_diffusion_scale is None or eigenmode_decomposition is None:
         raise ImportError(
             "This example requires landscapy analysis utilities to be importable."
-        )
+        ) from _LANDSCAPY_IMPORT_ERROR
 
 
 def _aggregate_numeric_targets(
