@@ -540,6 +540,25 @@ class ProbCategoricalOutputAdapter(LandscapeOutputAdapter):
             )
         mean = outputs["mean"]
         var = outputs.get("var")
+        if not torch.is_tensor(mean):
+            raise TypeError(
+                "Probabilistic categorical adapter received non-tensor 'mean' output."
+            )
+        if mean.ndim != 2:
+            raise ValueError(
+                "Probabilistic categorical adapter expects 'mean' with shape "
+                "(n_sequences, n_categories)."
+            )
+        if var is not None:
+            if not torch.is_tensor(var):
+                raise TypeError(
+                    "Probabilistic categorical adapter received non-tensor 'var' output."
+                )
+            if var.shape != mean.shape:
+                raise ValueError(
+                    "Probabilistic categorical adapter expects 'var' to have the "
+                    "same shape as 'mean'."
+                )
         num_classes = mean.shape[-1]
         cats = (
             list(categories)
@@ -552,10 +571,10 @@ class ProbCategoricalOutputAdapter(LandscapeOutputAdapter):
             )
         meta = dict(metadata)
         if var is not None:
-            meta["variance"] = var.numpy()
+            meta["variance"] = var.detach().cpu().numpy()
         return ProbabilisticCategoricalFitness(
             name=layer_name,
-            probabilities=mean.numpy(),
+            probabilities=mean.detach().cpu().numpy(),
             categories=cats,
             metadata=meta,
         )
