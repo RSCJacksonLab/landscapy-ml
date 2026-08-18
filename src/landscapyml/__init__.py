@@ -1,5 +1,7 @@
 """landscapy-ml core public API."""
 
+from importlib.metadata import PackageNotFoundError, version
+
 from .core.adaptor import (
     GraphTensorInputAdapter,
     LandscapeExport,
@@ -46,7 +48,13 @@ from .landscape_regression import (
     run_landscape_regression_csv,
 )
 
+try:
+    __version__ = version("landscapy-ml")
+except PackageNotFoundError:  # pragma: no cover - source tree without installation
+    __version__ = "0+unknown"
+
 __all__ = [
+    "__version__",
     "GraphTensorInputAdapter",
     "LandscapeDataModule",
     "LandscapeDataset",

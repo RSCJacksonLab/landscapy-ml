@@ -1,10 +1,73 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "landscapy-ml"
+version = "0.1.0"
+description = "PyTorch adapters and example training pipelines for Landscapy fitness landscapes"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  { name = "Matthew A. Spence", email = "matthew.spence@anu.edu.au" },
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+  "click>=8.1",
+  "landscapy>=0.9,<1",
+  "networkx>=3.2",
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "pytorch-lightning>=2.3",
+  "scipy>=1.10",
+  "tensorboard>=2.20",
+  "torch>=2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "black>=24.4",
+  "build>=1.2",
+  "flake8>=7.0",
+  "isort>=5.13",
+  "pre-commit>=3.7",
+  "pytest>=8.0",
+  "pytest-cov>=6.0",
+  "pytest-mock>=3.14",
+  "twine>=5.0",
+]
+graph = ["torch-geometric>=2.6"]
+gp = ["gpytorch>=1.13"]
+examples = [
+  "gpytorch>=1.13",
+  "torch-geometric>=2.6",
+]
+tracking = ["wandb>=0.16"]
+
+[project.urls]
+Homepage = "https://github.com/RSCJacksonLab/landscapy-ml"
+Issues = "https://github.com/RSCJacksonLab/landscapy-ml/issues"
+Repository = "https://github.com/RSCJacksonLab/landscapy-ml"
+
+[project.scripts]
+landscapy-ml = "landscapyml.__main__:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.black]
 line-length = 88
-target-version = ['py37', 'py38', 'py39']
+target-version = ["py311", "py312"]
 include = '\.pyi?$'
 
 [tool.isort]
