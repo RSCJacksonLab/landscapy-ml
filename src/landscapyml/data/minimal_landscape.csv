@@ -1,0 +1,5 @@
+sequence,target,set,validation
+AAA,0.00,train,false
+AAC,0.25,train,false
+ACC,0.75,train,true
+CCC,1.00,test,false

@@ -2,97 +2,65 @@
 
 [![CI](https://github.com/RSCJacksonLab/landscapy-ml/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/RSCJacksonLab/landscapy-ml/actions/workflows/ci.yml)
 
-`landscapy-ml` is the small bridge between `landscapy` `FitnessLandscape`
-objects and PyTorch models. The package focuses on one path:
+`landscapy-ml` is the small bridge between
+[`landscapy`](https://github.com/RSCJacksonLab/landscapy) `FitnessLandscape`
+objects and PyTorch models.
 
-```text
-sequences + fitnesses + splits
--> landscapy FitnessLandscape
--> PyTorch training
--> predicted fitness layer attached back to the landscape
-```
+More information, documentation and usage instructions can be found on
+[`landscapy`](https://github.com/RSCJacksonLab/landscapy).
 
-The source is intentionally narrow:
-- `landscapyml.core.data`: generic landscape record datasets and data modules.
-- `landscapyml.core.adaptor`: landscape input/model/output adapters.
-- `landscapyml.core.model_registry`: functional model and data registration.
-- `landscapyml.core.trainer`: Lightning trainer construction and `TrainingJob`.
-- `landscapyml.core.inference`: trained model output back to landscapy fitness layers.
-- `landscapyml.examples`: maintained graph-regression data, GAT, and diffusion-prior GP demos.
+## Installation
 
-## Install
+`landscapy-ml` is installed by default with `pip install landscapy` or
+`pip install landscapy-ml`. This remains the recommended installation path.
+
+To install directly from a checkout:
 
 ```bash
-pip install -e ".[dev]"
-pip install -e ".[graph]"  # graph attention demo
-pip install -e ".[gp]"     # diffusion GP demo
-pip install -e ".[tracking]" # optional Weights & Biases logging
-```
-
-Training uses TensorBoard only by default. To opt in to Weights & Biases,
-install the ``tracking`` extra and call ``create_trainer(use_wandb=True, ...)``.
-No W&B client is imported or initialized unless that flag is enabled.
-
-## CLI
-
-```bash
-python -m landscapyml list
-
-MAX_EPOCHS=1 bash demo/run_gat.sh \
-  --csv-path demo/rhomax/by_wild_type/by_wild_type.csv.gz
-
-FIT_KWARGS='{"training_iters": 2, "learning_rate": 0.05}' \
-  bash demo/run_gp.sh \
-  --csv-path demo/rhomax/by_wild_type/by_wild_type.csv.gz
+python -m pip install .
 ```
 
 ## Python
 
+Use the Python interface to convert a `FitnessLandscape` into PyTorch-ready
+records and datasets, then adapt model outputs back into landscape layers as
+described in the [Python usage guide](docs/python_usage.md).
+
 ```python
-from fitness_landscape.models import create_nk_binary_landscape
+from importlib.resources import files
 
-from landscapyml.core.data import LandscapeGraphRegressionDataModule
-from landscapyml.core.trainer import create_trainer
-from landscapyml.examples.gat_fitness import (
-    GraphAttentionFitnessRegressor,
-    attach_graph_attention_predictions,
+from fitness_landscape.core.landscape import read_csv_landscape
+
+from landscapyml import (
+    LandscapeDataset,
+    export_landscape_records,
+    make_fitness_target_getter,
 )
 
-landscape = create_nk_binary_landscape(N=3, K=1, seed=42)
-
-dm = LandscapeGraphRegressionDataModule.from_landscape(
-    landscape=landscape,
-    target_layer="nk_k=1",
-    val_fraction=0.25,
-    seed=42,
-    normalize_features=True,
+data_path = files("landscapyml").joinpath("data/minimal_landscape.csv")
+landscape = read_csv_landscape(
+    data_path,
+    sequence_col="sequence",
+    alphabet=list("AC"),
+    graph="hamming",
+    numeric_layers=["target"],
+    attach_embeddings=False,
 )
-model = GraphAttentionFitnessRegressor(num_features=dm.train_graph.x.shape[-1])
-
-trainer = create_trainer(max_epochs=50, use_wandb=False)
-trainer.fit(model, datamodule=dm)
-
-predicted = attach_graph_attention_predictions(
+exported = export_landscape_records(
     landscape,
-    model,
-    layer_name="gat_predicted_fitness",
+    fitness_layers=["target"],
+    include_embeddings=False,
 )
+dataset = LandscapeDataset(
+    exported.records,
+    target_getter=make_fitness_target_getter("target"),
+)
+
+features, target = dataset[0]
+print(len(dataset), features.shape, target.shape)
 ```
 
-## Testing
+## CLI
 
-```bash
-python -m ruff check src tests
-python -m ruff format --check src tests
-python -m pydocstyle src/landscapyml
-python -m pre_commit run --all-files
-python -m pytest
-```
-
-Ruff is the single formatter, import sorter, and Python linter. Its checked
-rules and formatting policy are defined in `pyproject.toml`; pre-commit and CI
-run the same pinned Ruff and NumPy pydocstyle gates.
-
-The test command measures branch coverage for the complete `landscapyml`
-package, writes `coverage.xml`, and enforces the initial release baseline of
-75%. New exclusions should not be added in place of testing core behavior.
+Use the command-line interface to inspect registered models and data builders
+and run the maintained CSV workflows described in the [CLI guide](docs/cli.md).

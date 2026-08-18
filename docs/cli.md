@@ -1,37 +1,40 @@
-# CLI
+# Command-line interface
 
-The CLI is exposed via `python -m landscapyml`.
+The CLI lists registered components and runs the maintained CSV training
+workflows through `python -m landscapyml` or the `landscapy-ml` entry point.
 
 ## Commands
-- `list`: print registered model keys, data builders, and landscape runners.
-- `train-landscape`: train a landscape-regression model from CSV split files.
+
+- `list` prints registered model keys, data builders, and landscape runners.
+- `train-landscape` trains a registered landscape-regression workflow from CSV
+  split files.
 
 ## Examples
+
+List the registered components:
+
 ```bash
 python -m landscapyml list
+```
 
-python -m landscapyml train-landscape \
-  --csv-path demo/rhomax/by_wild_type/by_wild_type.csv.gz \
-  --model-key graph_attention_regressor \
-  --data-name landscape_graph_regression \
-  --max-epochs 1 \
-  --data-kwargs '{"normalize_features": true}' \
-  --trainer-kwargs '{"use_wandb": false, "checkpoint_monitor": null}'
+The repository includes a four-sequence portable CSV fixture. It can be used
+to exercise the diffusion-prior GP workflow without downloading data:
 
+```bash
 python -m landscapyml train-landscape \
-  --csv-path demo/rhomax/by_wild_type/by_wild_type.csv.gz \
+  --csv-path src/landscapyml/data/minimal_landscape.csv \
   --model-key diffusion_prior_gp \
   --fit-kwargs '{"training_iters": 2, "learning_rate": 0.05}'
 ```
 
 When an input has a split column, every non-validation row must match the
 configured train or test label after trimming whitespace and normalizing case.
-Blank or unknown labels are rejected with their CSV row numbers; validation
+Blank or unknown labels are rejected with their CSV row numbers. Validation
 markers take precedence. Result JSON records train, validation, test, and total
 assigned row counts.
 
-The legacy `train-landscape` workflow delegates CSV construction to Landscapy
-with a Hamming graph. It preserves disconnected components and does not replace
-the requested topology with a k-nearest-neighbor graph. Inputs that cannot form
-a Hamming graph, including unaligned variable-length sequences, fail with the
+The `train-landscape` workflow delegates CSV construction to Landscapy with a
+Hamming graph. It preserves disconnected components and does not replace the
+requested topology with a k-nearest-neighbor graph. Inputs that cannot form a
+Hamming graph, including unaligned variable-length sequences, fail with the
 Landscapy construction error.

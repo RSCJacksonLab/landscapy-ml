@@ -73,20 +73,6 @@ jobs:
           python -m pip install .ci/landscapy
           python -m pip install -e ".[dev]"
           python -m pip check
-      - name: Verify the absent GP-extra boundary
-        run: |
-          python -m pip uninstall --yes gpytorch linear-operator
-          python - <<'PY'
-          from landscapyml.examples import gp_fitness
-
-          assert gp_fitness.gpytorch is None
-          try:
-              gp_fitness._load_gpytorch()
-          except ImportError as exc:
-              assert "requires gpytorch" in str(exc)
-          else:
-              raise AssertionError("gpytorch unexpectedly available in the base environment")
-          PY
       - name: Run tests, documentation smoke checks, and coverage gate
         run: python -m pytest
       - name: Upload coverage report

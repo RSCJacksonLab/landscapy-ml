@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -30,29 +31,58 @@ def test_python_documentation_blocks_compile() -> None:
     assert checked > 0
 
 
-def test_readme_python_example_uses_current_api(
+def test_readme_python_example_uses_portable_fixture(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class NoOpTrainer:
-        def fit(self, model, *, datamodule) -> None:
-            assert model is not None
-            assert datamodule.train_graph.num_nodes == 8
-
-    import landscapyml.core.trainer
-
-    monkeypatch.setattr(
-        landscapyml.core.trainer,
-        "create_trainer",
-        lambda **kwargs: NoOpTrainer(),
-    )
+    monkeypatch.chdir(REPOSITORY_ROOT)
     blocks = _fenced_blocks(REPOSITORY_ROOT / "README.md", "python")
     assert len(blocks) == 1
 
     namespace: dict[str, object] = {}
     exec(compile(blocks[0], "README.md", "exec"), namespace)
 
+    dataset = namespace["dataset"]
     landscape = namespace["landscape"]
-    assert "gat_predicted_fitness" in landscape.fitness_layers
+    features, target = dataset[0]
+    assert len(dataset) == 4
+    assert features.shape == (3, 2)
+    assert target.shape == ()
+    assert list(landscape.fitness_layers) == ["target"]
+
+
+def test_documentation_uses_portable_fixture_and_no_semicolons() -> None:
+    fixture = REPOSITORY_ROOT / "src/landscapyml/data/minimal_landscape.csv"
+    assert fixture.is_file()
+
+    documentation = [REPOSITORY_ROOT / "README.md"]
+    documentation.extend(sorted((REPOSITORY_ROOT / "docs").glob("*.md")))
+    for path in documentation:
+        text = path.read_text(encoding="utf-8")
+        assert ";" not in text, (
+            f"Semicolon found in {path.relative_to(REPOSITORY_ROOT)}"
+        )
+
+    relative_fixture = fixture.relative_to(REPOSITORY_ROOT).as_posix()
+    assert "data/minimal_landscape.csv" in (REPOSITORY_ROOT / "README.md").read_text(
+        encoding="utf-8"
+    )
+    assert relative_fixture in (REPOSITORY_ROOT / "docs/cli.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_default_install_contains_every_non_dev_extra() -> None:
+    metadata = tomllib.loads(
+        (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]
+    default_requirements = set(metadata["dependencies"])
+
+    for name, requirements in metadata["optional-dependencies"].items():
+        if name == "dev":
+            continue
+        assert set(requirements) <= default_requirements, (
+            f"Optional dependency group {name!r} is not included in the default install"
+        )
 
 
 @pytest.mark.parametrize(

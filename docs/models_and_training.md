@@ -37,13 +37,10 @@ trainer, model, dm = job.run()
 Use `register_model(...)` and `register_data(...)` for project-specific
 Lightning models and data modules.
 
-## Optional Weights & Biases logging
+## Weights & Biases logging
 
-TensorBoard is the only logger enabled by default. W&B is an explicit opt-in:
-
-```bash
-pip install "landscapy-ml[tracking]"
-```
+TensorBoard is the only logger enabled by default. The standard installation
+includes the W&B client, but logging remains an explicit opt-in:
 
 ```python
 trainer = create_trainer(
@@ -53,6 +50,7 @@ trainer = create_trainer(
 ```
 
 The W&B client is not imported or initialized when `use_wandb=False`. If W&B
-is requested but the optional dependency is unavailable, training continues
-with TensorBoard and emits a warning. Omitting `wandb_project` also emits a
-warning because W&B will then choose its configured default project.
+is requested in a partial environment where the dependency is unavailable,
+training continues with TensorBoard and emits a warning. Omitting
+`wandb_project` also emits a warning because W&B will then choose its configured
+default project.

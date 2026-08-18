@@ -22,8 +22,11 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
+# The default install includes every user-facing capability. Named extras
+# remain below as compatibility aliases for existing environment files.
 dependencies = [
   "click>=8.1",
+  "gpytorch>=1.13",
   "landscapy>=0.9,<1",
   "networkx>=3.2",
   "numpy>=1.24",
@@ -32,6 +35,8 @@ dependencies = [
   "scipy>=1.10",
   "tensorboard>=2.20",
   "torch>=2.2",
+  "torch-geometric>=2.6",
+  "wandb>=0.16",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +58,11 @@ examples = [
   "torch-geometric>=2.6",
 ]
 tracking = ["wandb>=0.16"]
+all = [
+  "gpytorch>=1.13",
+  "torch-geometric>=2.6",
+  "wandb>=0.16",
+]
 
 [project.urls]
 Homepage = "https://github.com/RSCJacksonLab/landscapy-ml"
@@ -64,6 +74,9 @@ landscapy-ml = "landscapyml.__main__:cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+landscapyml = ["data/*.csv"]
 
 [tool.ruff]
 line-length = 88
