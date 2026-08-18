@@ -106,7 +106,18 @@ class LandscapeDataModule(pl.LightningDataModule):
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         self.shuffle = shuffle
-        self.val_split = val_split
+        try:
+            self.val_split = float(val_split)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"val_split must satisfy 0 <= val_split < 1 "
+                f"(got {val_split!r} for {len(self.train_records)} training records)."
+            ) from exc
+        if not np.isfinite(self.val_split) or not 0 <= self.val_split < 1:
+            raise ValueError(
+                f"val_split must satisfy 0 <= val_split < 1 "
+                f"(got {val_split!r} for {len(self.train_records)} training records)."
+            )
         self.val_seed = val_seed
         self.dataset_factory = dataset_factory
         self.dataset_kwargs = dict(dataset_kwargs or {})
@@ -119,6 +130,13 @@ class LandscapeDataModule(pl.LightningDataModule):
 
         if not self.train_records:
             raise ValueError("train_data must not be empty.")
+        if not self.val_records and self.val_split > 0:
+            train_count = int(len(self.train_records) * (1 - self.val_split))
+            if train_count < 1:
+                raise ValueError(
+                    f"val_split={self.val_split} leaves no training records "
+                    f"from {len(self.train_records)} input records."
+                )
 
         self._train_ds: Optional[Dataset] = None
         self._val_ds: Optional[Dataset] = None
@@ -142,8 +160,18 @@ class LandscapeDataModule(pl.LightningDataModule):
                 idx = torch.randperm(len(self.train_records), generator=rng).tolist()
                 split = int(len(idx) * (1 - self.val_split))
                 train_idx, val_idx = idx[:split], idx[split:]
-                self.val_records = [self.train_records[i] for i in val_idx]
-                self.train_records = [self.train_records[i] for i in train_idx]
+                if not train_idx or not val_idx:
+                    raise ValueError(
+                        f"val_split={self.val_split} cannot produce non-empty "
+                        f"training and validation partitions from {len(idx)} records."
+                    )
+                source_records = self.train_records
+                new_train_records = [source_records[i] for i in train_idx]
+                new_val_records = [source_records[i] for i in val_idx]
+                self.train_records, self.val_records = (
+                    new_train_records,
+                    new_val_records,
+                )
 
             self._train_ds = self._build_dataset(self.train_records, stage="fit")
             self._val_ds = self._build_dataset(self.val_records, stage="fit")
