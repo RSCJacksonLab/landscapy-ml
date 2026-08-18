@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import torch
 
 from landscapyml.core.inference import (
@@ -63,6 +64,136 @@ def test_predict_landscape_records():
     mean, var = predict_landscape_records(model, records)
     assert mean.shape == (2, 2)
     assert var.shape == (2, 2)
+
+
+class PlainProbModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(2, 2)
+        self.inference_mode_enabled = False
+
+    def predict_with_uncertainty(self, inputs):
+        self.inference_mode_enabled = torch.is_inference_mode_enabled()
+        mean = torch.softmax(self.linear(inputs), dim=-1)
+        return mean, torch.zeros_like(mean)
+
+
+def test_predict_sequences_supports_plain_module_and_disables_grad(monkeypatch):
+    fake_embeddings = torch.randn(2, 2)
+    monkeypatch.setattr(
+        "landscapyml.core.inference.embed_sequences",
+        lambda *args, **kwargs: (fake_embeddings, None, None),
+    )
+    model = PlainProbModel()
+
+    mean, var = predict_sequences(model, sequences=["AAA", "BBB"])
+
+    assert not model.training
+    assert model.inference_mode_enabled
+    assert mean.device.type == "cpu"
+    assert var.device.type == "cpu"
+    assert not mean.requires_grad
+    assert not var.requires_grad
+
+
+def test_predict_landscape_records_accepts_generator_for_plain_module():
+    model = PlainProbModel()
+    records = (
+        {"embedding": torch.tensor(feature)}
+        for feature in ([1.0, 0.0], [0.0, 1.0])
+    )
+
+    mean, var = predict_landscape_records(model, records)
+
+    assert mean.shape == (2, 2)
+    assert var.shape == (2, 2)
+    assert model.inference_mode_enabled
+
+
+def test_prediction_helpers_detach_preexisting_grad_enabled_outputs(monkeypatch):
+    class GradOutputModel:
+        def __init__(self):
+            self.mean = torch.tensor([[0.6, 0.4]], requires_grad=True)
+            self.var = torch.tensor([[0.1, 0.2]], requires_grad=True)
+
+        def eval(self):
+            return self
+
+        def predict_with_uncertainty(self, inputs):
+            return self.mean, self.var
+
+    monkeypatch.setattr(
+        "landscapyml.core.inference.embed_sequences",
+        lambda *args, **kwargs: (torch.randn(1, 2), None, None),
+    )
+
+    mean, var = predict_sequences(GradOutputModel(), sequences=["AAA"])
+
+    assert not mean.requires_grad
+    assert not var.requires_grad
+
+
+def test_prediction_helpers_reject_empty_inputs(monkeypatch):
+    def unexpected_embedding(*args, **kwargs):
+        raise AssertionError("empty inputs should fail before embedding")
+
+    monkeypatch.setattr(
+        "landscapyml.core.inference.embed_sequences", unexpected_embedding
+    )
+    model = PlainProbModel()
+
+    with pytest.raises(ValueError, match="sequences.*at least one"):
+        predict_sequences(model, sequences=[])
+    with pytest.raises(ValueError, match="records.*at least one"):
+        predict_landscape_records(model, iter(()))
+
+
+def test_predict_landscape_records_rejects_inconsistent_feature_shapes():
+    records = (
+        {"embedding": torch.tensor(feature)}
+        for feature in ([1.0, 0.0], [0.0, 1.0, 2.0])
+    )
+
+    with pytest.raises(ValueError, match="Record 1 feature shape"):
+        predict_landscape_records(PlainProbModel(), records)
+
+
+@pytest.mark.parametrize(
+    ("outputs", "error_type", "message"),
+    [
+        ((torch.ones(1, 2),), ValueError, "exactly two outputs"),
+        (([[0.5, 0.5]], torch.zeros(1, 2)), TypeError, "torch.Tensor"),
+        (
+            (torch.ones(2, 2), torch.zeros(2, 2)),
+            ValueError,
+            "Mean prediction batch dimension",
+        ),
+        (
+            (torch.ones(1, 2), torch.zeros(2, 2)),
+            ValueError,
+            "Variance prediction batch dimension",
+        ),
+        (
+            (torch.ones(1, 2), torch.zeros(1, 1)),
+            ValueError,
+            "same shape",
+        ),
+    ],
+)
+def test_predict_landscape_records_validates_uncertainty_outputs(
+    outputs, error_type, message
+):
+    class InvalidOutputModel:
+        def eval(self):
+            return self
+
+        def predict_with_uncertainty(self, inputs):
+            return outputs
+
+    records = [{"embedding": torch.tensor([1.0, 0.0])}]
+
+    with pytest.raises(error_type, match=message):
+        predict_landscape_records(InvalidOutputModel(), records)
 
 
 def test_infer_fitness_layer_from_landscape_with_stub(monkeypatch):

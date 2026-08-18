@@ -26,6 +26,37 @@ except Exception:  # pragma: no cover - optional dependency
     BaseFitnessLayer = Any  # type: ignore
 
 
+def _validated_uncertainty_outputs(
+    outputs: Any, *, expected_batch_size: int
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    if not isinstance(outputs, (tuple, list)) or len(outputs) != 2:
+        raise ValueError(
+            "predict_with_uncertainty must return exactly two outputs: "
+            "mean and variance."
+        )
+
+    mean_probs, variance = outputs
+    if not torch.is_tensor(mean_probs) or not torch.is_tensor(variance):
+        raise TypeError(
+            "predict_with_uncertainty mean and variance outputs must be "
+            "torch.Tensor objects."
+        )
+    if mean_probs.ndim == 0 or mean_probs.shape[0] != expected_batch_size:
+        raise ValueError(
+            "Mean prediction batch dimension does not match the number of inputs."
+        )
+    if variance.ndim == 0 or variance.shape[0] != expected_batch_size:
+        raise ValueError(
+            "Variance prediction batch dimension does not match the number of inputs."
+        )
+    if variance.shape != mean_probs.shape:
+        raise ValueError(
+            "Mean and variance prediction tensors must have the same shape."
+        )
+
+    return mean_probs.detach().cpu(), variance.detach().cpu()
+
+
 def predict_sequences(
     model: Any,
     sequences: Sequence[Any],
@@ -57,19 +88,32 @@ def predict_sequences(
     -------
     tuple[torch.Tensor, torch.Tensor]
         Mean class probabilities and variance tensors on CPU.
+
+    Raises
+    ------
+    ValueError
+        If ``sequences`` is empty or the model returns incompatible outputs.
     """
+    if len(sequences) == 0:
+        raise ValueError("sequences must contain at least one input.")
+
     model.eval()
-    embeddings, _, _ = embed_sequences(
-        sequences,
-        embedding_mode=embedding_mode,
-        model_name=model_name,
-        device=device,
-        embedding_batch_size=embedding_batch_size,
-        include_tokens=False,
+    model_device = infer_device(model) or torch.device("cpu")
+    with torch.inference_mode():
+        embeddings, _, _ = embed_sequences(
+            sequences,
+            embedding_mode=embedding_mode,
+            model_name=model_name,
+            device=device,
+            embedding_batch_size=embedding_batch_size,
+            include_tokens=False,
+        )
+        embeddings = embeddings.to(model_device)
+        outputs = model.predict_with_uncertainty(embeddings)
+    return _validated_uncertainty_outputs(
+        outputs,
+        expected_batch_size=embeddings.shape[0],
     )
-    embeddings = embeddings.to(model.device)
-    mean_probs, variance = model.predict_with_uncertainty(embeddings)
-    return mean_probs.cpu(), variance.cpu()
 
 
 def predict_landscape_records(
@@ -94,19 +138,42 @@ def predict_landscape_records(
     Raises
     ------
     ValueError
-        If a record lacks the required feature fields.
+        If no records are supplied, a record lacks the required feature fields,
+        feature shapes differ, or the model returns incompatible outputs.
     """
     model.eval()
-    feats = []
-    for rec in records:
-        feature = rec.get("embedding", rec.get("sequence_tensor"))
+    feats: list[torch.Tensor] = []
+    expected_shape: Optional[torch.Size] = None
+    for index, rec in enumerate(records):
+        if not isinstance(rec, Mapping):
+            raise TypeError(f"Record {index} must be a mapping.")
+        feature = rec.get("embedding")
         if feature is None:
-            raise ValueError("Record missing 'embedding' or 'sequence_tensor'.")
+            feature = rec.get("sequence_tensor")
+        if feature is None:
+            raise ValueError(
+                f"Record {index} is missing 'embedding' or 'sequence_tensor'."
+            )
         tensor = torch.as_tensor(feature, dtype=torch.float32)
+        if expected_shape is None:
+            expected_shape = tensor.shape
+        elif tensor.shape != expected_shape:
+            raise ValueError(
+                f"Record {index} feature shape {tuple(tensor.shape)} does not match "
+                f"the expected shape {tuple(expected_shape)}."
+            )
         feats.append(tensor)
-    inputs = torch.stack(feats, dim=0).to(model.device)
-    mean_probs, variance = model.predict_with_uncertainty(inputs)
-    return mean_probs.cpu(), variance.cpu()
+    if not feats:
+        raise ValueError("records must contain at least one input.")
+
+    model_device = infer_device(model) or torch.device("cpu")
+    inputs = torch.stack(feats, dim=0).to(model_device)
+    with torch.inference_mode():
+        outputs = model.predict_with_uncertainty(inputs)
+    return _validated_uncertainty_outputs(
+        outputs,
+        expected_batch_size=inputs.shape[0],
+    )
 
 
 def infer_fitness_layer_from_landscape(

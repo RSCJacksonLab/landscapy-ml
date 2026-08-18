@@ -6,11 +6,13 @@ Inference helpers live in `landscapyml.core.inference` and operate on trained mo
 - `predict_sequences(model, sequences, *, embedding_mode="hard", model_name="facebook/esm2_t6_8M_UR50D", device=None, embedding_batch_size=32) -> (mean_probs, variance)`
   - Embeds raw sequences via `embed_sequences` (no tokens returned) and runs `model.predict_with_uncertainty`.
   - The model must implement `predict_with_uncertainty`.
+  - Inference uses the model's declared device or first parameter device, with a CPU fallback.
 
 ## FitnessLandscape record predictions
 - `predict_landscape_records(model, records) -> (mean_probs, variance)`
   - Accepts iterable of record dicts (from `FitnessLandscape.to_sequence_tensors(as_batch=False)` or produced by `embed_sequences_to_records`).
   - Uses `embedding` if present, else `sequence_tensor`, stacks tensors, and forwards to `predict_with_uncertainty`.
+  - Features must have consistent shapes. Inference uses the model's declared device or first parameter device, with a CPU fallback.
 
 ## FitnessLandscape layer attachment
 - `infer_fitness_layer_from_landscape(landscape, model, *, batch_size=256, num_workers=0, device=None, attach=True, inplace=True, layer_name="predicted_fitness", categories=None, input_adapter=None, input_adapter_kwargs=None)`
