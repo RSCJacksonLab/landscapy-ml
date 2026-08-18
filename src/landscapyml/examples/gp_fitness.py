@@ -8,7 +8,8 @@ import numpy as np
 import torch
 
 from ..core._optional import is_missing_optional_dependency
-from ..core.adaptor import NodeIndexInputAdapter, register_input_adapter
+from ..core.adaptor import NodeIndexInputAdapter
+from ..core.data_utils import aggregate_numeric_targets, feature_normalization_stats
 from ..core.inference import infer_fitness_layer_from_landscape
 
 try:
@@ -56,23 +57,6 @@ def _require_landscapy_bits() -> None:
         raise ImportError(
             "This example requires landscapy analysis utilities to be importable."
         ) from _LANDSCAPY_IMPORT_ERROR
-
-
-def _aggregate_numeric_targets(
-    layer: Any, *, aggregate_func: Optional[Callable[..., Any]] = np.mean
-) -> np.ndarray:
-    if getattr(layer, "dtype", None) != "numeric":
-        raise ValueError(
-            "The GP example currently supports numeric fitness layers only."
-        )
-    if aggregate_func is None:
-        values = layer.to_scalar()
-    else:
-        try:
-            values = layer.to_scalar(aggregate_func=aggregate_func)
-        except TypeError:
-            values = layer.to_scalar()
-    return np.asarray(values, dtype=float).reshape(-1)
 
 
 def _normalize_mask_tokens(mask_tokens: Sequence[str] | None) -> tuple[str, ...]:
@@ -184,23 +168,6 @@ def _compute_diffusion_covariance_matrix(
     return 0.5 * (cov + cov.T)
 
 
-def _scalar_feature_normalization_stats(
-    values: torch.Tensor,
-    *,
-    eps: float = 1e-8,
-) -> tuple[float, float]:
-    tensor = torch.as_tensor(values, dtype=torch.float32).view(-1)
-    if tensor.numel() == 0:
-        raise ValueError("Cannot normalize an empty feature tensor.")
-    if not bool(torch.isfinite(tensor).all()):
-        raise ValueError("Cannot normalize features containing NaN or Inf values.")
-    mean = float(tensor.mean().item())
-    scale = float(tensor.std(unbiased=False).item())
-    if scale <= float(eps):
-        scale = 1.0
-    return mean, scale
-
-
 @dataclass
 class DiffusionGPArtifacts:
     covariance_matrix: torch.Tensor
@@ -267,7 +234,7 @@ def build_diffusion_gp_artifacts_from_landscape(
     if not isinstance(layers, Mapping) or target_layer not in layers:
         raise ValueError(f"Landscape does not contain target layer '{target_layer}'.")
 
-    target_values = _aggregate_numeric_targets(
+    target_values = aggregate_numeric_targets(
         layers[target_layer],
         aggregate_func=aggregate_func,
     )
@@ -370,10 +337,12 @@ def build_diffusion_gp_artifacts_from_landscape(
     feature_mean = 0.0
     feature_scale = 1.0
     if normalize_features:
-        feature_mean, feature_scale = _scalar_feature_normalization_stats(
+        mean_tensor, scale_tensor = feature_normalization_stats(
             train_inputs,
             eps=feature_normalization_eps,
         )
+        feature_mean = float(mean_tensor.item())
+        feature_scale = float(scale_tensor.item())
 
     return DiffusionGPArtifacts(
         covariance_matrix=covariance_tensor,
@@ -556,10 +525,6 @@ class DiffusionPriorExactGP(_ExactGPBase):
         return posterior.mean
 
 
-class LandscapeNodeIndexInputAdapter(NodeIndexInputAdapter):
-    name = "landscape_node_index"
-
-
 def fit_diffusion_prior_gp(
     landscape: Any,
     *,
@@ -690,20 +655,12 @@ def attach_diffusion_gp_predictions(
     )
 
 
-register_input_adapter(
-    LandscapeNodeIndexInputAdapter.name,
-    LandscapeNodeIndexInputAdapter,
-    overwrite=True,
-)
-
-
 __all__ = [
     "DEFAULT_MASK_TOKENS",
     "DiffusionGPArtifacts",
     "DiffusionGPFitResult",
     "DiffusionPriorExactGP",
     "DiffusionPriorKernel",
-    "LandscapeNodeIndexInputAdapter",
     "attach_diffusion_gp_predictions",
     "build_diffusion_gp_artifacts_from_landscape",
     "fit_diffusion_prior_gp",

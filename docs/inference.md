@@ -35,16 +35,14 @@ Model-specific bridges should live at the package edge rather than in the
 shared core.
 
 For graph-native models, `landscapyml.examples.gat_fitness` reuses the core
-`GraphTensorInputAdapter` and also exposes a backwards-compatible
-`landscape_graph` alias:
+`GraphTensorInputAdapter` registered as `graph_tensor`:
 - `attach_graph_attention_predictions(...)` as a convenience wrapper around
   `infer_fitness_layer_from_landscape(...)`
 - a `GraphAttentionFitnessRegressor` example whose outputs attach as a numeric
   fitness layer
 
 For diffusion-prior GP workflows, `landscapyml.examples.gp_fitness` reuses the
-core `NodeIndexInputAdapter` and also exposes a backwards-compatible
-`landscape_node_index` alias:
+core `NodeIndexInputAdapter` registered as `node_index`:
 - `attach_diffusion_gp_predictions(...)` as a convenience wrapper around
   `infer_fitness_layer_from_landscape(...)`
 - `DiffusionPriorExactGP`, which predicts numeric fitness values for the nodes

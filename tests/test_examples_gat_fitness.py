@@ -2,6 +2,7 @@ import sys
 import types
 
 import numpy as np
+import pytest
 import torch
 
 from landscapyml.core.adaptor import GraphTensorInputAdapter, resolve_input_adapter
@@ -138,7 +139,7 @@ def test_graph_attention_regressor_forward(monkeypatch):
     assert out.shape == (3,)
 
 
-def test_graph_example_registers_core_graph_adapter_alias(monkeypatch):
+def test_graph_example_uses_only_core_graph_adapter(monkeypatch):
     monkeypatch.setitem(
         sys.modules,
         "torch_geometric.nn",
@@ -146,5 +147,7 @@ def test_graph_example_registers_core_graph_adapter_alias(monkeypatch):
     )
 
     __import__("landscapyml.examples.gat_fitness")
-    adapter = resolve_input_adapter("landscape_graph")
+    adapter = resolve_input_adapter("graph_tensor")
     assert isinstance(adapter, GraphTensorInputAdapter)
+    with pytest.raises(ValueError, match="Unknown input adapter 'landscape_graph'"):
+        resolve_input_adapter("landscape_graph")

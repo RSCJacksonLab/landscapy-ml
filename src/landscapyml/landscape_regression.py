@@ -11,6 +11,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 import networkx as nx
 import numpy as np
+from scipy.stats import pearsonr, spearmanr
 
 from .core.inference import infer_fitness_layer_from_landscape
 from .core.data_utils import sequence_composition_features
@@ -618,32 +619,29 @@ def _regression_metrics(
         "n": int(y.size),
         "rmse": float(np.sqrt(np.mean(np.square(residual)))),
         "mae": float(np.mean(np.abs(residual))),
-        "pearson": _correlation(y, pred),
-        "spearman": _correlation(_rankdata(y), _rankdata(pred)),
+        "pearson": _correlation(y, pred, method="pearson"),
+        "spearman": _correlation(y, pred, method="spearman"),
     }
 
 
-def _correlation(a: np.ndarray, b: np.ndarray) -> float | None:
+def _correlation(
+    a: np.ndarray,
+    b: np.ndarray,
+    *,
+    method: str,
+) -> float | None:
     if a.size < 2 or b.size < 2:
         return None
     if float(np.std(a)) == 0.0 or float(np.std(b)) == 0.0:
         return None
-    return float(np.corrcoef(a, b)[0, 1])
-
-
-def _rankdata(values: np.ndarray) -> np.ndarray:
-    order = np.argsort(values, kind="mergesort")
-    sorted_values = values[order]
-    ranks = np.empty(values.shape[0], dtype=float)
-    start = 0
-    while start < sorted_values.shape[0]:
-        end = start + 1
-        while end < sorted_values.shape[0] and sorted_values[end] == sorted_values[start]:
-            end += 1
-        average_rank = 0.5 * (start + end - 1)
-        ranks[order[start:end]] = average_rank
-        start = end
-    return ranks
+    if method == "pearson":
+        result = pearsonr(a, b)
+    elif method == "spearman":
+        result = spearmanr(a, b)
+    else:
+        raise ValueError(f"Unknown correlation method {method!r}.")
+    statistic = float(result.statistic)
+    return statistic if np.isfinite(statistic) else None
 
 
 def _output_path_for_csv(path: Path, model_key: str, suffix: str) -> Path:
