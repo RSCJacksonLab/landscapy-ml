@@ -5,6 +5,7 @@ import types
 
 import networkx as nx
 import numpy as np
+import pytest
 import torch
 import torch.nn.functional as F
 
@@ -252,10 +253,14 @@ def test_diffusion_prior_gp_predict_and_fit(monkeypatch):
     assert result.model.normalize_features is True
 
 
-def test_gp_example_registers_core_node_index_adapter_alias(monkeypatch):
+def test_gp_example_uses_only_core_node_index_adapter(monkeypatch):
     _install_fake_gpytorch(monkeypatch)
     module = importlib.import_module("landscapyml.examples.gp_fitness")
     importlib.reload(module)
 
-    adapter = resolve_input_adapter("landscape_node_index")
+    adapter = resolve_input_adapter("node_index")
     assert isinstance(adapter, NodeIndexInputAdapter)
+    with pytest.raises(
+        ValueError, match="Unknown input adapter 'landscape_node_index'"
+    ):
+        resolve_input_adapter("landscape_node_index")

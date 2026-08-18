@@ -1,8 +1,9 @@
 from pathlib import Path
 
+import numpy as np
 import pytest
 
-from landscapyml.landscape_regression import _read_split_indices
+from landscapyml.landscape_regression import _read_split_indices, _regression_metrics
 
 
 def _write_csv(path: Path, text: str) -> Path:
@@ -112,3 +113,29 @@ def test_read_split_indices_rejects_empty_files(tmp_path):
             train_label="train",
             test_label="test",
         )
+
+
+def test_regression_metrics_preserve_average_tie_spearman_definition():
+    metrics = _regression_metrics(
+        np.asarray([1.0, 1.0, 2.0, 3.0]),
+        np.asarray([3.0, 1.0, 1.0, 2.0]),
+        [0, 1, 2, 3],
+    )
+
+    assert metrics["pearson"] == pytest.approx(-0.0909090909090909)
+    assert metrics["spearman"] == pytest.approx(-0.05555555555555556)
+
+
+@pytest.mark.parametrize(
+    ("target", "prediction"),
+    [([1.0], [2.0]), ([1.0, 1.0], [1.0, 2.0]), ([1.0, 2.0], [3.0, 3.0])],
+)
+def test_regression_metrics_keep_undefined_correlations_as_none(target, prediction):
+    metrics = _regression_metrics(
+        np.asarray(target),
+        np.asarray(prediction),
+        list(range(len(target))),
+    )
+
+    assert metrics["pearson"] is None
+    assert metrics["spearman"] is None

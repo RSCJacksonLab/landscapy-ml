@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 
-from ..core.adaptor import GraphTensorInputAdapter, register_input_adapter
+from ..core.adaptor import GraphTensorInputAdapter
 from ..core.data import (
     LandscapeGraphRegressionDataModule,
     build_regression_graph_from_landscape,
@@ -176,10 +176,6 @@ class GraphAttentionFitnessRegressor(pl.LightningModule):
         )
 
 
-class LandscapeGraphInputAdapter(GraphTensorInputAdapter):
-    name = "landscape_graph"
-
-
 def attach_graph_attention_predictions(
     landscape: Any,
     model: GraphAttentionFitnessRegressor,
@@ -209,11 +205,6 @@ def attach_graph_attention_predictions(
     )
 
 
-register_input_adapter(
-    LandscapeGraphInputAdapter.name,
-    LandscapeGraphInputAdapter,
-    overwrite=True,
-)
 register_model(
     "graph_attention_regressor",
     GraphAttentionFitnessRegressor,
@@ -221,7 +212,6 @@ register_model(
 )
 __all__ = [
     "GraphAttentionFitnessRegressor",
-    "LandscapeGraphInputAdapter",
     "LandscapeGraphRegressionDataModule",
     "attach_graph_attention_predictions",
     "build_regression_graph_from_landscape",
