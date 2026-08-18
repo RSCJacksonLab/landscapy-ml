@@ -24,7 +24,6 @@ The source is intentionally narrow:
 pip install -e ".[dev]"
 pip install -e ".[graph]"  # graph attention demo
 pip install -e ".[gp]"     # diffusion GP demo
-pip install -e ".[tuning]" # Ray Tune demo support
 pip install -e ".[tracking]" # optional Weights & Biases logging
 ```
 
@@ -40,9 +39,6 @@ python -m landscapyml list
 MAX_EPOCHS=1 bash demo/run_gat.sh \
   --csv-path demo/rhomax/by_wild_type/by_wild_type.csv.gz
 
-RAY_TUNE=1 NUM_SAMPLES=4 MAX_EPOCHS=1 bash demo/run_gat.sh \
-  --csv-path demo/rhomax/by_wild_type/by_wild_type.csv.gz
-
 FIT_KWARGS='{"training_iters": 2, "learning_rate": 0.05}' \
   bash demo/run_gp.sh \
   --csv-path demo/rhomax/by_wild_type/by_wild_type.csv.gz
@@ -51,28 +47,31 @@ FIT_KWARGS='{"training_iters": 2, "learning_rate": 0.05}' \
 ## Python
 
 ```python
-from landscapyml.examples.data import LandscapeGraphRegressionDataModule
+from fitness_landscape.models import create_nk_binary_landscape
+
+from landscapyml.core.data import LandscapeGraphRegressionDataModule
+from landscapyml.core.trainer import create_trainer
 from landscapyml.examples.gat_fitness import (
     GraphAttentionFitnessRegressor,
     attach_graph_attention_predictions,
 )
-from landscapyml.examples.logging import create_examples_trainer
-from landscapyml.examples.pipeline import prepare_landscape_regression_data_from_dataframe
 
-prepared = prepare_landscape_regression_data_from_dataframe(df)
+landscape = create_nk_binary_landscape(N=3, K=1, seed=42)
 
 dm = LandscapeGraphRegressionDataModule.from_landscape(
-    landscape=prepared.landscape,
-    target_layer="target",
+    landscape=landscape,
+    target_layer="nk_k=1",
+    val_fraction=0.25,
+    seed=42,
     normalize_features=True,
 )
 model = GraphAttentionFitnessRegressor(num_features=dm.train_graph.x.shape[-1])
 
-trainer = create_examples_trainer(max_epochs=50)
+trainer = create_trainer(max_epochs=50, use_wandb=False)
 trainer.fit(model, datamodule=dm)
 
 predicted = attach_graph_attention_predictions(
-    prepared.landscape,
+    landscape,
     model,
     layer_name="gat_predicted_fitness",
 )
