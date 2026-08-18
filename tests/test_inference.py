@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 import torch
 from landscapyml.core.inference import (
+    LandscapeInferenceResult,
     infer_fitness_layer_from_landscape,
     predict_landscape_records,
     predict_sequences,
@@ -17,12 +18,17 @@ class DummyLandscape:
         self._attached = None
         self._active_embedding_domain = None
         self.embedding_model = None
+        self.safe_layer_name_called = False
 
     def get_embedding(self):
         return self._embeddings
 
     def attach(self, layer):
         self._attached = layer
+
+    def safe_layer_name(self, name):
+        self.safe_layer_name_called = True
+        return f"{name}_safe"
 
 
 class DummyProbModel(torch.nn.Module):
@@ -249,6 +255,59 @@ def test_inference_propagates_safe_layer_name_errors(monkeypatch):
             attach=True,
             categories=["a", "b"],
         )
+
+
+@pytest.mark.parametrize(
+    ("attach", "inplace"),
+    [(False, False), (False, True), (True, False), (True, True)],
+)
+def test_infer_fitness_layer_attachment_and_copy_semantics(
+    monkeypatch, attach, inplace
+):
+    class StubFitness:
+        def __init__(self, name, probabilities, categories, metadata):
+            self.name = name
+            self.probabilities = probabilities
+            self.categories = categories
+            self.metadata = metadata
+
+    monkeypatch.setattr(
+        "landscapyml.core.adaptor.ProbabilisticCategoricalFitness", StubFitness
+    )
+    landscape = DummyLandscape(
+        np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float)
+    )
+    model = DummyProbModel(num_classes=2)
+    register_model_layer_mapping(DummyProbModel, "prob_categorical", overwrite=True)
+
+    returned = infer_fitness_layer_from_landscape(
+        landscape,
+        model,
+        batch_size=1,
+        attach=attach,
+        inplace=inplace,
+        categories=["a", "b"],
+        layer_name="prediction",
+    )
+
+    if attach and not inplace:
+        assert isinstance(returned, LandscapeInferenceResult)
+        assert returned.landscape is not landscape
+        assert returned.landscape._attached is returned.layer
+        assert returned.landscape.safe_layer_name_called
+        assert returned.layer.name == "prediction_safe"
+        assert landscape._attached is None
+        assert not landscape.safe_layer_name_called
+    else:
+        assert isinstance(returned, StubFitness)
+        if attach:
+            assert landscape._attached is returned
+            assert landscape.safe_layer_name_called
+            assert returned.name == "prediction_safe"
+        else:
+            assert landscape._attached is None
+            assert not landscape.safe_layer_name_called
+            assert returned.name == "prediction"
 
 
 def test_custom_layer_adapter_registration(monkeypatch):

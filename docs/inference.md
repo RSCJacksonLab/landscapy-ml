@@ -19,7 +19,11 @@ Inference helpers live in `landscapyml.core.inference` and operate on trained mo
   - Resolves a model adapter for `model` (registered or provided) to standardize inference.
   - Resolves a landscape input adapter (defaults to embedding-based extraction).
   - Ensures embedding domain/model compatibility between the adapter and landscape when available.
-  - Batches inputs through the adapter and builds a `ProbabilisticCategoricalFitness` layer via the registered output adapter. When `attach` is true, attaches to the landscape (copying if `inplace` is false).
+  - Batches inputs through the adapter and builds a fitness layer via the registered output adapter.
+  - With `attach=False`, returns the unattached layer; `inplace` has no effect.
+  - With `attach=True, inplace=True`, attaches to the supplied landscape and returns the layer, preserving the original API.
+  - With `attach=True, inplace=False`, deep-copies the landscape, attaches to that copy, and returns `LandscapeInferenceResult(landscape=copy, layer=layer)`. This replaces the previous ineffective behavior, which returned only the layer and made the copy unreachable.
+  - Collision-safe layer naming is resolved against the landscape that receives the layer.
   - The `fitness_landscape` dependency is optional; when absent, imports fall back to stub types and landscape-related helpers are unavailable.
 
 ## Extensibility
