@@ -185,17 +185,17 @@ def test_runner_registration_duplicate_and_overwrite() -> None:
     assert "unit" in regression.available_landscape_regression_runners()
 
 
-def test_import_builtin_examples_imports_both_modules(
+def test_import_builtin_models_imports_both_modules(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     imported = []
     monkeypatch.setattr(regression.importlib, "import_module", imported.append)
 
-    regression.import_builtin_examples()
+    regression.import_builtin_models()
 
     assert imported == [
-        "landscapyml.examples.gat_fitness",
-        "landscapyml.examples.gp_fitness",
+        "landscapyml.models.gat_fitness",
+        "landscapyml.models.gp_fitness",
     ]
 
 
@@ -285,7 +285,7 @@ def test_output_path_normalizes_extensions_and_model_name(tmp_path: Path) -> Non
 def test_run_landscape_regression_requires_inputs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(regression, "import_builtin_examples", lambda: None)
+    monkeypatch.setattr(regression, "import_builtin_models", lambda: None)
 
     with pytest.raises(ValueError, match="No CSV inputs"):
         regression.run_landscape_regression(
@@ -300,7 +300,7 @@ def test_run_landscape_regression_deduplicates_and_continues_after_error(
     first = _write_csv(tmp_path / "a.csv", "sequence,target\nAAA,1\n")
     second = _write_csv(tmp_path / "b.csv", "sequence,target\nAAC,2\n")
     calls = []
-    monkeypatch.setattr(regression, "import_builtin_examples", lambda: None)
+    monkeypatch.setattr(regression, "import_builtin_models", lambda: None)
 
     def fake_run(config, csv_path, output_path):
         calls.append(csv_path)
@@ -330,7 +330,7 @@ def test_run_landscape_regression_stops_on_error(
     tmp_path: Path,
 ) -> None:
     path = _write_csv(tmp_path / "a.csv", "sequence,target\nAAA,1\n")
-    monkeypatch.setattr(regression, "import_builtin_examples", lambda: None)
+    monkeypatch.setattr(regression, "import_builtin_models", lambda: None)
     monkeypatch.setattr(
         regression,
         "run_landscape_regression_csv",

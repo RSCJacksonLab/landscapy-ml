@@ -12,7 +12,7 @@ from .core.model_registry import _DATA_REGISTRY, _MODEL_REGISTRY
 from .landscape_regression import (
     LandscapeRegressionConfig,
     available_landscape_regression_runners,
-    import_builtin_examples,
+    import_builtin_models,
     run_landscape_regression,
 )
 
@@ -26,7 +26,7 @@ def cli() -> None:
 @cli.command("list", help="List registered models and data builders.")
 def list_registered() -> None:
     """Print registered models, data builders, and regression runners."""
-    import_builtin_examples()
+    import_builtin_models()
     click.echo("Models:")
     for name in sorted(_MODEL_REGISTRY):
         click.echo(f"  - {name}")

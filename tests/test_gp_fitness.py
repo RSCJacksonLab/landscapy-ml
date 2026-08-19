@@ -98,7 +98,7 @@ class FakeFitnessLandscape:
 
 
 def test_build_diffusion_gp_artifacts_drops_masked_nodes_for_t_map(monkeypatch):
-    from landscapyml.examples import gp_fitness
+    from landscapyml.models import gp_fitness
 
     called = {}
 
@@ -204,7 +204,7 @@ def _install_fake_gpytorch(monkeypatch):
 
 def test_diffusion_prior_gp_predict_and_fit(monkeypatch):
     _install_fake_gpytorch(monkeypatch)
-    module = importlib.import_module("landscapyml.examples.gp_fitness")
+    module = importlib.import_module("landscapyml.models.gp_fitness")
     module = importlib.reload(module)
 
     covariance = torch.eye(3)
@@ -259,7 +259,7 @@ def test_diffusion_prior_gp_predict_and_fit(monkeypatch):
 
 def test_gp_example_uses_only_core_node_index_adapter(monkeypatch):
     _install_fake_gpytorch(monkeypatch)
-    module = importlib.import_module("landscapyml.examples.gp_fitness")
+    module = importlib.import_module("landscapyml.models.gp_fitness")
     importlib.reload(module)
 
     adapter = resolve_input_adapter("node_index")

@@ -233,24 +233,24 @@ def available_landscape_regression_runners() -> list[str]:
     return sorted(_LANDSCAPE_REGRESSION_RUNNERS)
 
 
-def import_builtin_examples() -> None:
-    """Import bundled examples for their registry side effects.
+def import_builtin_models() -> None:
+    """Import bundled models for their registry side effects.
 
     Optional dependencies remain lazy inside the examples where possible.
 
     Returns
     -------
     None
-        Bundled example modules are imported.
+        Bundled model modules are imported.
 
     Notes
     -----
-    Importing registers example models, adapters, data builders, and custom
+    Importing registers models, adapters, data builders, and custom
     landscape runners in process-local registries.
     """
     for module_name in (
-        "landscapyml.examples.gat_fitness",
-        "landscapyml.examples.gp_fitness",
+        "landscapyml.models.gat_fitness",
+        "landscapyml.models.gp_fitness",
     ):
         importlib.import_module(module_name)
 
@@ -302,7 +302,7 @@ def run_landscape_regression(
     Each successful or captured-error result is written to JSON beside its
     source CSV. The workflow imports bundled examples for registry side effects.
     """
-    import_builtin_examples()
+    import_builtin_models()
     csv_paths = [Path(path) for path in config.csv_paths]
     if config.demo_root is not None:
         csv_paths.extend(discover_demo_csvs(Path(config.demo_root)))
@@ -578,7 +578,7 @@ def _run_registered_lightning_model(
 
 
 def _run_diffusion_prior_gp(context: LandscapeRegressionContext) -> dict[str, Any]:
-    from .examples.gp_fitness import (
+    from .models.gp_fitness import (
         attach_diffusion_gp_predictions,
         fit_diffusion_prior_gp,
     )
@@ -758,7 +758,7 @@ __all__ = [
     "SplitIndices",
     "available_landscape_regression_runners",
     "discover_demo_csvs",
-    "import_builtin_examples",
+    "import_builtin_models",
     "register_landscape_regression_runner",
     "run_landscape_regression",
     "run_landscape_regression_csv",

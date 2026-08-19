@@ -91,9 +91,9 @@ jobs:
       matrix:
         include:
           - extra: graph
-            test-file: tests/test_examples_gat_fitness.py
+            test-file: tests/test_gat_fitness.py
           - extra: gp
-            test-file: tests/test_examples_gp_fitness.py
+            test-file: tests/test_gp_fitness.py
     steps:
       - name: Check out landscapy-ml
         uses: actions/checkout@v4

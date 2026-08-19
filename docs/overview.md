@@ -6,7 +6,7 @@ small, composable helpers for exporting landscapes into records, wiring those
 records into datasets and Lightning datamodules, and adapting model outputs
 back into landscape fitness layers.
 
-Model-specific integrations are examples built on top of that core rather than
+Model-specific integrations are built on top of that core rather than forming
 the primary abstraction.
 
 ## Package layout
@@ -16,7 +16,7 @@ the primary abstraction.
 - `landscapyml.core.model_registry`: Functional model/data registration. This is what the CLI and `TrainingJob` use to resolve model and data names.
 - `landscapyml.core.trainer`: Trainer construction and `TrainingJob`. It consumes the registry but does not own it.
 - `landscapyml.core.inference`: Trained model -> `FitnessLandscape` mapping, including attaching predicted fitness layers.
-- `landscapyml.examples`: Optional model-specific examples for the maintained GAT and diffusion-prior GP demo paths.
+- `landscapyml.models`: Maintained GAT and diffusion-prior GP integrations.
 - `landscapyml.logging_utils`: Lightweight logging configuration aligned with landscapy.
 - `landscapyml.__main__`: CLI entry point (`python -m landscapyml`).
 

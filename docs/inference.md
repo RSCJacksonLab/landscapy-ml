@@ -47,14 +47,14 @@ registered class in the model's MRO wins. A registered adapter factory takes
 priority over a model-to-layer mapping because it defines the complete
 inference interface.
 
-For graph-native models, `landscapyml.examples.gat_fitness` reuses the core
+For graph-native models, `landscapyml.models.gat_fitness` reuses the core
 `GraphTensorInputAdapter` registered as `graph_tensor`:
 - `attach_graph_attention_predictions(...)` as a convenience wrapper around
   `infer_fitness_layer_from_landscape(...)`
 - a `GraphAttentionFitnessRegressor` example whose outputs attach as a numeric
   fitness layer
 
-For diffusion-prior GP workflows, `landscapyml.examples.gp_fitness` reuses the
+For diffusion-prior GP workflows, `landscapyml.models.gp_fitness` reuses the
 core `NodeIndexInputAdapter` registered as `node_index`:
 - `attach_diffusion_gp_predictions(...)` as a convenience wrapper around
   `infer_fitness_layer_from_landscape(...)`

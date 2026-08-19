@@ -25,8 +25,8 @@
 - `predict_landscape_records`
 - `infer_fitness_layer_from_landscape`
 
-## Demos
-- `landscapyml.examples.gat_fitness`
-- `landscapyml.examples.gp_fitness`
+## Models
+- `landscapyml.models.gat_fitness`
+- `landscapyml.models.gp_fitness`
 - `python -m landscapyml list`
 - `python -m landscapyml train-landscape`

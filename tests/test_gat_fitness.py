@@ -95,7 +95,7 @@ def test_build_regression_graph_adds_training_feature_normalization(monkeypatch)
         types.SimpleNamespace(GATConv=FakeGATConv),
     )
 
-    from landscapyml.examples.gat_fitness import (
+    from landscapyml.models.gat_fitness import (
         GraphAttentionFitnessRegressor,
     )
 
@@ -133,7 +133,7 @@ def test_graph_attention_regressor_forward(monkeypatch):
         types.SimpleNamespace(GATConv=FakeGATConv),
     )
 
-    from landscapyml.examples.gat_fitness import GraphAttentionFitnessRegressor
+    from landscapyml.models.gat_fitness import GraphAttentionFitnessRegressor
 
     graph = DummyGraph()
     model = GraphAttentionFitnessRegressor(
@@ -150,7 +150,7 @@ def test_graph_example_uses_only_core_graph_adapter(monkeypatch):
         types.SimpleNamespace(GATConv=FakeGATConv),
     )
 
-    __import__("landscapyml.examples.gat_fitness")
+    __import__("landscapyml.models.gat_fitness")
     adapter = resolve_input_adapter("graph_tensor")
     assert isinstance(adapter, GraphTensorInputAdapter)
     with pytest.raises(ValueError, match="Unknown input adapter 'landscape_graph'"):
